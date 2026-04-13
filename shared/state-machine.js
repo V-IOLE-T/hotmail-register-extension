@@ -22,6 +22,7 @@ export const DEFAULT_RUNTIME = {
   currentAccountIndex: 0,
   currentAccount: null,
   currentEmailRecord: null,
+  authTabId: null,
   localhostUrl: '',
   lastSignupCode: '',
   lastLoginCode: '',

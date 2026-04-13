@@ -88,6 +88,67 @@ test('getEmailDetail fetches internal email detail with encoded path params', as
   ]);
 });
 
+test('listTempEmails and temp email detail endpoints use encoded temp email paths', async () => {
+  const requests = [];
+  const responses = [
+    {
+      ok: true,
+      status: 200,
+      payload: {
+        success: true,
+        temp_emails: [{ email: 'demo@temp.example', provider: 'duckmail' }],
+      },
+    },
+    {
+      ok: true,
+      status: 200,
+      payload: {
+        success: true,
+        emails: [{ id: 'tm1', subject: 'Code', body_preview: '123456' }],
+      },
+    },
+    {
+      ok: true,
+      status: 200,
+      payload: {
+        success: true,
+        message: { id: 'tm1', body_text: 'Your code is 123456' },
+      },
+    },
+  ];
+
+  const client = createInternalSessionClient({
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async (url, options = {}) => {
+      requests.push({
+        url,
+        method: options.method || 'GET',
+      });
+      const next = responses.shift();
+      return {
+        ok: next.ok,
+        status: next.status,
+        async json() {
+          return next.payload;
+        },
+      };
+    },
+  });
+
+  const tempEmails = await client.listTempEmails();
+  const messages = await client.listTempEmailMessages('demo@temp.example');
+  const detail = await client.getTempEmailDetail('demo@temp.example', 'tm/1');
+
+  assert.equal(tempEmails.length, 1);
+  assert.equal(messages.length, 1);
+  assert.equal(detail.id, 'tm1');
+  assert.deepEqual(requests, [
+    { url: 'http://localhost:5000/api/temp-emails', method: 'GET' },
+    { url: 'http://localhost:5000/api/temp-emails/demo%40temp.example/messages', method: 'GET' },
+    { url: 'http://localhost:5000/api/temp-emails/demo%40temp.example/messages/tm%2F1', method: 'GET' },
+  ]);
+});
+
 test('createInternalSessionClient exposes the request url when fetch fails', async () => {
   const client = createInternalSessionClient({
     baseUrl: 'http://localhost:5000',

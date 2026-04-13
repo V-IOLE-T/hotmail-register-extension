@@ -5,7 +5,7 @@ import { buildAutoRestartRuntimeUpdates } from './shared/auto-restart.js';
 import { createInternalSessionClient } from './shared/internal-session-client.js';
 import { createLuckmailClient } from './shared/luckmail-client.js';
 import { resolveLoginPassword } from './shared/login-password.js';
-import { createContentStepSignalRegistry } from './shared/content-step-signals.js';
+import { createContentStepSignalRegistry, settleStepWaiterFromDispatchResult } from './shared/content-step-signals.js';
 import { chooseOauthTabCandidate, listAuthTabIds } from './shared/open-oauth-target.js';
 import { findLoopbackCallbackUrl } from './shared/oauth-step-helpers-core.js';
 import { decideOauthTabNavigation } from './shared/oauth-tab-navigation.js';
@@ -59,6 +59,7 @@ async function resetTransientRuntime() {
   await setRuntime({
     currentAccount: null,
     currentEmailRecord: null,
+    authTabId: null,
     localhostUrl: '',
     lastSignupCode: '',
     lastLoginCode: '',
@@ -203,6 +204,9 @@ function buildClient(settings) {
   return createLuckmailClient({
     apiKey: settings.apiKey,
     baseUrl: settings.mailApiBaseUrl,
+    internalClient: settings.mailApiBaseUrl
+      ? createInternalSessionClient({ baseUrl: settings.mailApiBaseUrl })
+      : null,
   });
 }
 
@@ -246,14 +250,19 @@ async function ensureCurrentEmailRecord(state) {
 }
 
 async function getActiveAuthTab() {
+  const state = await getState();
   const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const tabs = await chrome.tabs.query({});
   const tab = chooseOauthTabCandidate({
     currentTab: currentTab || null,
     tabs,
+    preferredTabId: state.authTabId,
   }) || currentTab;
   if (!tab?.id) {
     throw new Error('未找到当前活动标签页');
+  }
+  if (state.authTabId !== tab.id) {
+    await setRuntime({ authTabId: tab.id });
   }
   return tab;
 }
@@ -382,9 +391,11 @@ async function openOauthUrl(oauthUrl) {
 
   const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const tabs = await chrome.tabs.query({});
+  const state = await getState();
   const tab = chooseOauthTabCandidate({
     currentTab: currentTab || null,
     tabs,
+    preferredTabId: state.authTabId,
   });
   const plan = decideOauthTabNavigation({
     currentTab: tab,
@@ -393,16 +404,22 @@ async function openOauthUrl(oauthUrl) {
 
   if (plan.action === 'reload' && plan.tabId) {
     await chrome.tabs.reload(plan.tabId, { bypassCache: true });
-    return waitForTabComplete(plan.tabId);
+    const resolvedTab = await waitForTabComplete(plan.tabId);
+    await setRuntime({ authTabId: plan.tabId });
+    return resolvedTab;
   }
 
   if (plan.action === 'update' && plan.tabId) {
     await chrome.tabs.update(plan.tabId, { url: plan.url, active: true });
-    return waitForTabComplete(plan.tabId);
+    const resolvedTab = await waitForTabComplete(plan.tabId);
+    await setRuntime({ authTabId: plan.tabId });
+    return resolvedTab;
   }
 
   const created = await chrome.tabs.create({ url: oauthUrl, active: true });
-  return waitForTabComplete(created.id);
+  const resolvedTab = await waitForTabComplete(created.id);
+  await setRuntime({ authTabId: created.id });
+  return resolvedTab;
 }
 
 async function closeAuthTabs() {
@@ -484,9 +501,7 @@ async function pollCodeForPhase(state, phase) {
   const step = phase === 'signup' ? 4 : 7;
   const phaseLabel = phase === 'signup' ? '注册验证码' : '登录验证码';
   const phaseStartedAt = new Date().toISOString();
-  const detailFetcher = state.mailApiBaseUrl
-    ? createInternalSessionClient({ baseUrl: state.mailApiBaseUrl })
-    : null;
+  const client = buildClient(state);
   const result = await pollVerificationCodeWithResend({
     step,
     maxRounds: 3,
@@ -504,8 +519,8 @@ async function pollCodeForPhase(state, phase) {
     pollVerificationCode: async ({ minReceivedAt, round }) => {
       await ensureAutoFlowActive();
       return pollVerificationCode({
-        client: buildClient(state),
-        detailFetcher,
+        client,
+        detailFetcher: client,
         email: account.address,
         intervalMs: state.pollIntervalSec * 1000,
         timeoutMs: state.pollTimeoutSec * 1000,
@@ -600,6 +615,10 @@ async function getSessionCookiesForBaseUrl(baseUrl) {
 
 async function syncRegisteredTagForState(state, account) {
   const record = state.currentEmailRecord;
+  if (account?.isTemp || record?.isTemp) {
+    await addLog('已注册标签同步跳过：当前账号属于临时邮箱来源', 'info');
+    return { skipped: true, reason: 'temp_email' };
+  }
   if (!state.mailApiBaseUrl) {
     await addLog('已注册标签同步跳过：未配置 API URL', 'warn');
     return { skipped: true, reason: 'missing_base_url' };
@@ -1010,9 +1029,7 @@ const handlers = {
           sendToActiveAuthTab,
           sendToTab,
         }).then((dispatchResult) => {
-          if (dispatchResult?.error) {
-            contentStepSignals.rejectStep(step, new Error(dispatchResult.error));
-          }
+          settleStepWaiterFromDispatchResult(contentStepSignals, step, dispatchResult);
         }).catch((error) => {
           if (!isMissingReceiverError(error)) {
             contentStepSignals.rejectStep(step, error);

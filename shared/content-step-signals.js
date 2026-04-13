@@ -40,3 +40,19 @@ export function createContentStepSignalRegistry() {
     waitForStep,
   };
 }
+
+export function settleStepWaiterFromDispatchResult(registry, step, dispatchResult) {
+  if (!registry || !dispatchResult) {
+    return false;
+  }
+
+  if (dispatchResult.error || dispatchResult.ok === false) {
+    return registry.rejectStep(step, new Error(dispatchResult.error || `页面内步骤 ${step} 执行失败`));
+  }
+
+  if (dispatchResult.ok) {
+    return registry.resolveStep(step, dispatchResult);
+  }
+
+  return false;
+}

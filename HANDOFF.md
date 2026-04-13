@@ -1,5 +1,81 @@
 # HANDOFF
 
+## 2026-04-13 临时邮箱接入补充（以下内容补充最新状态）
+
+- 补充时间：2026-04-13
+- 触发背景：
+  - 用户确认当前 Outlook Email 后台里有 `GPTMail / DuckMail / Cloudflare` 临时邮箱
+  - 但插件自动运行提示：
+    - `没有更多未注册邮箱可用`
+  - 用户同时提供 API 文档，明确说明：
+    - `/api/external/accounts` 只返回普通邮箱账号，不包含临时邮箱
+    - 临时邮箱需走 `/api/temp-emails` 与对应 `/messages` 接口
+
+### 本次确认的根因
+
+- 原实现的账号获取与验证码轮询全都只接了普通邮箱对外 API：
+  - 取号：`/api/external/accounts`
+  - 查信：`/api/external/emails`
+  - 详情：内部 `/api/email/<email>/<message_id>`
+
+- 结果：
+  - 页面里虽然能看到临时邮箱
+  - 但插件的自动运行链路根本不会把它们当候选账号
+  - 也无法通过临时邮箱邮件接口轮询验证码
+
+### 本次修复
+
+- `shared/internal-session-client.js`
+  - 新增临时邮箱内部接口：
+    - `listTempEmails()`
+    - `listTempEmailMessages(email)`
+    - `getTempEmailDetail(email, messageId)`
+
+- `shared/luckmail-client.js`
+  - 改成混合邮箱 client
+  - `listAccounts()` 现在会合并：
+    - 普通邮箱 `/api/external/accounts`
+    - 临时邮箱 `/api/temp-emails`
+  - 统一标准化账号结构，新增：
+    - `source: 'external' | 'temp'`
+    - `isTemp: boolean`
+  - `listUserEmailMails()` 现在会自动分流：
+    - 普通邮箱 → `/api/external/emails`
+    - 临时邮箱 → `/api/temp-emails/<email>/messages`
+  - `getEmailDetail()` 现在也会自动分流：
+    - 普通邮箱 → 内部 `/api/email/...`
+    - 临时邮箱 → `/api/temp-emails/<email>/messages/<message_id>`
+
+- `background.js`
+  - `buildClient()` 现在会把内部 session client 注入统一 mail client
+  - `pollCodeForPhase()` 现在直接复用统一 client 做邮件详情提取
+  - 若当前账号属于临时邮箱来源：
+    - 收尾时跳过“已注册”标签同步
+    - 记录日志：
+      - `已注册标签同步跳过：当前账号属于临时邮箱来源`
+
+### 本次修改的关键文件
+
+- `shared/internal-session-client.js`
+- `shared/luckmail-client.js`
+- `background.js`
+- `tests/internal-session-client.test.js`
+- `tests/luckmail-client.test.js`
+
+### fresh 验证证据
+
+```bash
+node --test tests/internal-session-client.test.js tests/luckmail-client.test.js
+npm test
+find . -name '*.js' -not -path './.git/*' -print0 | xargs -0 -n1 node --check
+```
+
+结果：
+
+- 定向测试通过
+- 全量 `113/113` 通过
+- JS 语法检查通过
+
 ## 2026-04-13 `Failed to fetch` 日志诊断补充（以下内容补充最新状态）
 
 - 补充时间：2026-04-13

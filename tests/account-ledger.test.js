@@ -79,3 +79,21 @@ test('resolveCurrentAccountSelection skips accounts that already have the 已注
     index: 1,
   });
 });
+
+test('resolveCurrentAccountSelection falls back to the beginning when startIndex is stale', () => {
+  const accounts = [
+    { address: 'duck@cstea.shop', tags: [] },
+    { address: 'gpt@vmm.indev', tags: [] },
+  ];
+
+  const result = resolveCurrentAccountSelection({
+    accounts,
+    ledger: {},
+    startIndex: 99,
+  });
+
+  assert.deepEqual(result, {
+    account: { address: 'duck@cstea.shop', tags: [] },
+    index: 0,
+  });
+});

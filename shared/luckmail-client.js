@@ -35,9 +35,32 @@ function normalizeAccount(account = {}) {
     tags: Array.isArray(account.tags) ? account.tags : [],
     status: account.status || '',
     provider: account.provider || '',
+    source: 'external',
+    isTemp: false,
     requestedEmail: account.requested_email || '',
     resolvedEmail: account.resolved_email || account.email || '',
     matchedAlias: account.matched_alias || '',
+  };
+}
+
+function normalizeTempAccount(account = {}) {
+  return {
+    id: account.id || account.temp_id || 0,
+    address: String(account.email || account.email_addr || account.address || '').trim().toLowerCase(),
+    aliases: [],
+    password: account.password || account.mail_password || account.login_password || account.jwt || '',
+    clientId: '',
+    refreshToken: '',
+    groupId: account.group_id || 0,
+    groupName: account.group_name || '',
+    tags: Array.isArray(account.tags) ? account.tags : [],
+    status: account.status || 'active',
+    provider: account.provider || account.channel || account.account_type || '',
+    source: 'temp',
+    isTemp: true,
+    requestedEmail: account.requested_email || account.email || account.email_addr || '',
+    resolvedEmail: account.resolved_email || account.email || account.email_addr || account.address || '',
+    matchedAlias: '',
   };
 }
 
@@ -58,6 +81,7 @@ export function createLuckmailClient({
   apiKey,
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl = fetch,
+  internalClient = null,
 } = {}) {
   if (!apiKey) {
     throw new Error('邮件平台 API Key 不能为空');
@@ -89,8 +113,11 @@ export function createLuckmailClient({
     const payload = await request('/api/external/accounts', {
       group_id: groupId,
     });
-    const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
-    return accounts.map(normalizeAccount);
+    const externalAccounts = (Array.isArray(payload.accounts) ? payload.accounts : []).map(normalizeAccount);
+    const tempAccounts = internalClient?.listTempEmails
+      ? await internalClient.listTempEmails().then((items) => items.map(normalizeTempAccount)).catch(() => [])
+      : [];
+    return [...externalAccounts, ...tempAccounts].filter((account) => account.address);
   }
 
   async function findUserEmailByAddress(address, options = {}) {
@@ -134,6 +161,26 @@ export function createLuckmailClient({
     fromContains = '',
     keyword = '',
   } = {}) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (internalClient?.listTempEmails && internalClient?.listTempEmailMessages) {
+      const tempAccounts = await internalClient.listTempEmails().catch(() => []);
+      const matchedTempAccount = tempAccounts
+        .map(normalizeTempAccount)
+        .find((account) => account.address === normalizedEmail);
+      if (matchedTempAccount) {
+        const emails = await internalClient.listTempEmailMessages(matchedTempAccount.address);
+        return {
+          emails: emails.map(normalizeMail),
+          partial: false,
+          details: null,
+          requestedEmail: email,
+          resolvedEmail: matchedTempAccount.address,
+          matchedAlias: '',
+          hasMore: false,
+        };
+      }
+    }
+
     const payload = await request('/api/external/emails', {
       email,
       folder,
@@ -155,11 +202,41 @@ export function createLuckmailClient({
     };
   }
 
+  async function getEmailDetail(email, messageId, options = {}) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (internalClient?.listTempEmails && internalClient?.getTempEmailDetail) {
+      const tempAccounts = await internalClient.listTempEmails().catch(() => []);
+      const matchedTempAccount = tempAccounts
+        .map(normalizeTempAccount)
+        .find((account) => account.address === normalizedEmail);
+      if (matchedTempAccount) {
+        const detail = await internalClient.getTempEmailDetail(matchedTempAccount.address, messageId);
+        return {
+          id: detail.id || detail.message_id || messageId,
+          subject: detail.subject || '',
+          body: detail.body || detail.html || detail.body_html || '',
+          bodyText: detail.body_text || detail.body_preview || detail.text || detail.body || '',
+          bodyType: detail.body_type || '',
+          from: detail.from || '',
+          to: detail.to || '',
+          date: detail.date || detail.received_at || '',
+        };
+      }
+    }
+
+    if (!internalClient?.getEmailDetail) {
+      throw new Error('邮件平台客户端缺少 getEmailDetail 接口');
+    }
+
+    return internalClient.getEmailDetail(email, messageId, options);
+  }
+
   return {
     importEmails,
     findFirstUnregisteredAccount,
     listAccounts,
     findUserEmailByAddress,
     listUserEmailMails,
+    getEmailDetail,
   };
 }

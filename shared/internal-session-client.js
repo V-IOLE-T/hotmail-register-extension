@@ -1,5 +1,10 @@
-function buildUrl(baseUrl, pathname) {
-  return new URL(pathname, baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString();
+function buildUrl(baseUrl, pathname, query = {}) {
+  const url = new URL(pathname, baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`);
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue;
+    url.searchParams.set(key, String(value));
+  }
+  return url.toString();
 }
 
 async function parseJsonResponse(response) {
@@ -24,7 +29,7 @@ export function createInternalSessionClient({
   }
 
   async function request(pathname, options = {}) {
-    const url = buildUrl(baseUrl, pathname);
+    const url = buildUrl(baseUrl, pathname, options.query || {});
     let response;
     try {
       response = await fetchImpl(url, {
@@ -51,6 +56,38 @@ export function createInternalSessionClient({
   async function listTags() {
     const payload = await request('/api/tags');
     return Array.isArray(payload.tags) ? payload.tags : [];
+  }
+
+  async function listTempEmails() {
+    const payload = await request('/api/temp-emails');
+    if (Array.isArray(payload.temp_emails)) return payload.temp_emails;
+    if (Array.isArray(payload.emails)) return payload.emails;
+    if (Array.isArray(payload.accounts)) return payload.accounts;
+    return [];
+  }
+
+  async function listTempEmailMessages(email) {
+    if (!email) {
+      throw new Error('获取临时邮箱邮件列表缺少邮箱地址');
+    }
+
+    const encodedEmail = encodeURIComponent(email);
+    const payload = await request(`/api/temp-emails/${encodedEmail}/messages`);
+    return Array.isArray(payload.emails) ? payload.emails : [];
+  }
+
+  async function getTempEmailDetail(email, messageId) {
+    if (!email) {
+      throw new Error('获取临时邮箱详情缺少邮箱地址');
+    }
+    if (!messageId) {
+      throw new Error('获取临时邮箱详情缺少 messageId');
+    }
+
+    const encodedEmail = encodeURIComponent(email);
+    const encodedMessageId = encodeURIComponent(messageId);
+    const payload = await request(`/api/temp-emails/${encodedEmail}/messages/${encodedMessageId}`);
+    return payload.message || payload.email || payload.data || {};
   }
 
   async function createTag({ name, color = '#16a34a', csrfToken }) {
@@ -128,6 +165,9 @@ export function createInternalSessionClient({
   return {
     getCsrfToken,
     listTags,
+    listTempEmails,
+    listTempEmailMessages,
+    getTempEmailDetail,
     createTag,
     getEmailDetail,
     setAccountTag,

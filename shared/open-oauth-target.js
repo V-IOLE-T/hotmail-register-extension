@@ -7,9 +7,16 @@ function isAuthHostUrl(url) {
   }
 }
 
-export function chooseOauthTabCandidate({ currentTab = null, tabs = [] } = {}) {
+export function chooseOauthTabCandidate({ currentTab = null, tabs = [], preferredTabId = null } = {}) {
   if (currentTab?.url && isAuthHostUrl(currentTab.url)) {
     return currentTab;
+  }
+
+  if (preferredTabId != null) {
+    const preferredTab = tabs.find((tab) => tab?.id === preferredTabId && tab?.url && isAuthHostUrl(tab.url));
+    if (preferredTab) {
+      return preferredTab;
+    }
   }
 
   return tabs.find((tab) => tab?.url && isAuthHostUrl(tab.url)) || null;

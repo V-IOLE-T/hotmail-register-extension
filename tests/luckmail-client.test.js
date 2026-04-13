@@ -212,3 +212,102 @@ test('findFirstUnregisteredAccount can skip multiple excluded addresses includin
   });
   assert.equal(account.address, 'next@hotmail.com');
 });
+
+test('listAccounts merges temp emails from internal session client', async () => {
+  const client = createLuckmailClient({
+    apiKey: 'test-key',
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async () => createJsonResponse({
+      success: true,
+      total: 1,
+      accounts: [
+        {
+          id: 3,
+          email: 'normal@outlook.com',
+          tags: [],
+        },
+      ],
+    }),
+    internalClient: {
+      async listTempEmails() {
+        return [
+          {
+            id: 11,
+            email: 'temp@cstea.shop',
+            provider: 'duckmail',
+          },
+        ];
+      },
+    },
+  });
+
+  const accounts = await client.listAccounts();
+  assert.equal(accounts.length, 2);
+  assert.deepEqual(accounts.map((item) => [item.address, item.source, item.isTemp]), [
+    ['normal@outlook.com', 'external', false],
+    ['temp@cstea.shop', 'temp', true],
+  ]);
+});
+
+test('listUserEmailMails routes temp emails to internal temp mailbox endpoints', async () => {
+  const client = createLuckmailClient({
+    apiKey: 'test-key',
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async () => {
+      throw new Error('external endpoint should not be used');
+    },
+    internalClient: {
+      async listTempEmails() {
+        return [
+          { email: 'temp@cstea.shop', provider: 'duckmail' },
+        ];
+      },
+      async listTempEmailMessages(email) {
+        assert.equal(email, 'temp@cstea.shop');
+        return [
+          {
+            id: 'tm1',
+            subject: 'OpenAI verification code',
+            body_preview: 'Your code is 123456',
+            from: 'noreply@openai.com',
+            date: '2026-04-13T04:00:00Z',
+          },
+        ];
+      },
+    },
+  });
+
+  const result = await client.listUserEmailMails('temp@cstea.shop');
+  assert.equal(result.resolvedEmail, 'temp@cstea.shop');
+  assert.equal(result.emails[0].messageId, 'tm1');
+  assert.equal(result.emails[0].bodyText, 'Your code is 123456');
+});
+
+test('getEmailDetail routes temp emails to internal temp email detail endpoint', async () => {
+  const client = createLuckmailClient({
+    apiKey: 'test-key',
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async () => {
+      throw new Error('external endpoint should not be used');
+    },
+    internalClient: {
+      async listTempEmails() {
+        return [
+          { email: 'temp@cstea.shop', provider: 'duckmail' },
+        ];
+      },
+      async getTempEmailDetail(email, messageId) {
+        assert.equal(email, 'temp@cstea.shop');
+        assert.equal(messageId, 'tm1');
+        return {
+          id: 'tm1',
+          body_text: 'Your code is 789012',
+        };
+      },
+    },
+  });
+
+  const detail = await client.getEmailDetail('temp@cstea.shop', 'tm1');
+  assert.equal(detail.id, 'tm1');
+  assert.equal(detail.bodyText, 'Your code is 789012');
+});

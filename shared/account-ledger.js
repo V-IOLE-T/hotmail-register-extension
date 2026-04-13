@@ -39,18 +39,32 @@ export function resolveCurrentAccountSelection({
   startIndex = 0,
   tagName = '已注册',
 } = {}) {
-  for (let index = Math.max(0, Number(startIndex) || 0); index < accounts.length; index += 1) {
-    const account = accounts[index];
-    const status = getAccountStatus(ledger, account?.address)?.status;
-    const hasRegisteredTag = Array.isArray(account?.tags)
-      && account.tags.some((tag) => tag?.name === tagName);
-    if (status === 'completed' || hasRegisteredTag) {
-      continue;
+  const normalizedStartIndex = Math.max(0, Number(startIndex) || 0);
+  const scanFrom = (fromIndex) => {
+    for (let index = fromIndex; index < accounts.length; index += 1) {
+      const account = accounts[index];
+      const status = getAccountStatus(ledger, account?.address)?.status;
+      const hasRegisteredTag = Array.isArray(account?.tags)
+        && account.tags.some((tag) => tag?.name === tagName);
+      if (status === 'completed' || hasRegisteredTag) {
+        continue;
+      }
+      return {
+        account,
+        index,
+      };
     }
-    return {
-      account,
-      index,
-    };
+    return null;
+  };
+
+  const primaryMatch = scanFrom(normalizedStartIndex);
+  if (primaryMatch) {
+    return primaryMatch;
   }
+
+  if (normalizedStartIndex > 0) {
+    return scanFrom(0);
+  }
+
   return null;
 }
