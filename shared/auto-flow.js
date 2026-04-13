@@ -45,6 +45,7 @@ export async function runSingleAutoFlow({ actions = {} } = {}) {
   await checkAutoControl();
   await findCurrentEmailRecord();
   await addLog('阶段 2：打开认证页面并进入注册流程');
+  // 步骤1 已经会自动打开 OAuth 页面，这里作为兜底（比如断点续跑时步骤1没执行）
   await openOauthUrl();
   await checkAutoControl();
   await executeSignupStep(2);

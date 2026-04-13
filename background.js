@@ -892,12 +892,15 @@ const handlers = {
       }, 15000);
       if (result?.oauthUrl) {
         await setSettings({ oauthUrl: result.oauthUrl });
+        await addLog('步骤 1：已获取 OAuth 链接，正在打开认证页面...', 'info');
+        const latestState = await getState();
+        await openOauthUrl(latestState.oauthUrl);
         return { oauthUrl: result.oauthUrl };
       }
       return result;
     }, {
       startMessage: '步骤 1：正在从 CPA 面板抓取 OAuth 链接...',
-      successMessage: '步骤 1：已从 CPA 面板获取 OAuth 链接',
+      successMessage: '步骤 1：已从 CPA 面板获取 OAuth 链接并打开认证页面',
     });
   },
   async PREPARE_NEXT_ACCOUNT() {
