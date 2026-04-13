@@ -17,6 +17,8 @@ export const DEFAULT_SETTINGS = {
   recordSuccessResults: false,
   successResults: [],
   usedAccounts: {},
+  mailProvider: 'outlook',
+  appleEmailBaseUrl: 'https://www.appleemail.top',
 };
 
 export const DEFAULT_RUNTIME = {
@@ -88,6 +90,10 @@ export function sanitizeSettings(input = {}) {
     usedAccounts: input.usedAccounts && typeof input.usedAccounts === 'object'
       ? { ...input.usedAccounts }
       : {},
+    mailProvider: ['outlook', 'appleemail'].includes(input.mailProvider)
+      ? input.mailProvider
+      : 'outlook',
+    appleEmailBaseUrl: String(input.appleEmailBaseUrl || '').trim(),
   };
 }
 

@@ -40,6 +40,14 @@
 
         <div class="data-card">
           <label class="data-row">
+            <span class="data-label">邮箱服务商</span>
+            <select id="mail-provider" class="data-input">
+              <option value="outlook">Outlook (Luckmail)</option>
+              <option value="appleemail">AppleEmail (小苹果)</option>
+            </select>
+          </label>
+
+          <label class="data-row outlook-only">
             <span class="data-label">API Key</span>
             <span class="secret-field">
               <input id="api-key" class="data-input mono has-eye" type="password" placeholder="邮件平台 API Key">
@@ -47,9 +55,14 @@
             </span>
           </label>
 
-          <label class="data-row">
+          <label class="data-row outlook-only">
             <span class="data-label">API URL</span>
             <input id="mail-api-base-url" class="data-input mono" type="text" placeholder="例如 http://localhost:5000">
+          </label>
+
+          <label class="data-row appleemail-only" style="display:none">
+            <span class="data-label">AppleEmail URL</span>
+            <input id="apple-email-base-url" class="data-input mono" type="text" placeholder="https://www.appleemail.top">
           </label>
 
           <label class="data-row">
@@ -107,6 +120,25 @@
           <div id="selected-account-hint" class="picker-selected">未指定：将使用第一个可用邮箱</div>
           <div id="account-search-status" class="picker-status">正在准备可用邮箱列表...</div>
           <div id="account-search-results" class="picker-results"></div>
+        </div>
+      </details>
+
+      <details class="card appleemail-only" id="appleemail-account-pool-card" style="display:none">
+        <summary class="picker-summary">
+          <span class="picker-summary-main">
+            <span class="picker-summary-title">AppleEmail 账号池</span>
+            <span class="picker-summary-caption">每行一个账号，用于邮箱查询</span>
+          </span>
+          <span class="summary-tip">展开后粘贴账号信息</span>
+        </summary>
+
+        <div class="picker-body">
+          <textarea id="account-pool-text" class="data-input mono account-pool-textarea" rows="6"
+            placeholder="每行一个账号，格式：&#10;邮箱----密码----clientid----refresh_token&#10;&#10;示例：&#10;user1@appleemail.top----pass123----cid_xxx----rt_xxx"></textarea>
+          <div class="account-pool-hint">
+            <span id="account-pool-count">0 个账号</span>
+            <span class="account-pool-format">格式：邮箱----密码----clientid----refresh_token</span>
+          </div>
         </div>
       </details>
 

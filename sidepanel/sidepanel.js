@@ -45,6 +45,7 @@ const STEP_DEFAULT_STATUSES = {
 const formIds = [
   'api-key',
   'mail-api-base-url',
+  'apple-email-base-url',
   'default-login-password',
   'oauth-url',
   'vps-url',
@@ -52,6 +53,7 @@ const formIds = [
   'run-count',
   'poll-interval',
   'poll-timeout',
+  'account-pool-text',
 ];
 
 const actionButtonIds = [
@@ -210,6 +212,7 @@ function markDirty() {
 function hydrateForm(state) {
   $('api-key').value = state.apiKey || '';
   $('mail-api-base-url').value = state.mailApiBaseUrl || '';
+  $('apple-email-base-url').value = state.appleEmailBaseUrl || '';
   $('default-login-password').value = state.defaultLoginPassword || '';
   $('oauth-url').value = state.oauthUrl || '';
   $('vps-url').value = state.vpsUrl || '';
@@ -217,6 +220,9 @@ function hydrateForm(state) {
   $('run-count').value = state.runCount || 1;
   $('poll-interval').value = state.pollIntervalSec || 3;
   $('poll-timeout').value = state.pollTimeoutSec || 60;
+  $('account-pool-text').value = state.accountPoolText || '';
+  updateProviderUI(state.mailProvider || 'outlook');
+  updateAccountPoolCount();
 }
 
 function renderSteps(state) {
@@ -411,9 +417,11 @@ function updateAutoRunButton(state = latestState) {
 }
 
 function collectSettings() {
+  const provider = $('mail-provider').value || 'outlook';
   return {
     apiKey: $('api-key').value.trim(),
     mailApiBaseUrl: $('mail-api-base-url').value.trim(),
+    appleEmailBaseUrl: $('apple-email-base-url').value.trim(),
     defaultLoginPassword: $('default-login-password').value,
     oauthUrl: $('oauth-url').value.trim(),
     vpsUrl: $('vps-url').value.trim(),
@@ -423,7 +431,34 @@ function collectSettings() {
     pollTimeoutSec: Number($('poll-timeout').value || 60),
     mailKeyword: latestState?.mailKeyword || '',
     mailFromKeyword: latestState?.mailFromKeyword || '',
+    mailProvider: provider,
+    accountPoolText: $('account-pool-text').value,
   };
+}
+
+function updateProviderUI(provider) {
+  const isAppleEmail = provider === 'appleemail';
+  document.querySelectorAll('.outlook-only').forEach((el) => {
+    el.style.display = isAppleEmail ? 'none' : '';
+  });
+  document.querySelectorAll('.appleemail-only').forEach((el) => {
+    el.style.display = isAppleEmail ? '' : 'none';
+  });
+  const providerSelect = $('mail-provider');
+  if (providerSelect) {
+    providerSelect.value = provider;
+  }
+}
+
+function updateAccountPoolCount() {
+  const textarea = $('account-pool-text');
+  const countEl = $('account-pool-count');
+  if (!textarea || !countEl) return;
+  const lines = textarea.value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  countEl.textContent = `${lines.length} 个账号`;
 }
 
 async function refreshState() {
@@ -673,6 +708,17 @@ formIds.forEach((id) => {
   if (!element) return;
   const eventName = element.type === 'checkbox' ? 'change' : 'input';
   element.addEventListener(eventName, markDirty);
+});
+
+$('mail-provider')?.addEventListener('change', () => {
+  const provider = $('mail-provider').value;
+  updateProviderUI(provider);
+  markDirty();
+});
+
+$('account-pool-text')?.addEventListener('input', () => {
+  updateAccountPoolCount();
+  markDirty();
 });
 
 elements.saveButton.addEventListener('click', () => {

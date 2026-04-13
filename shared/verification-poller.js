@@ -9,9 +9,30 @@ function parseTimestamp(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+const CODE_KEYWORD_PATTERNS = [
+  /(?:验证码|校验码|动态码|确认码|安全码)[:\s：]*(\d{4,8})\b/i,
+  /(?:verification\s*code|security\s*code|confirmation\s*code|one[\s-]*time\s*(?:code|password)|otp)[:\s：]*(\d{4,8})\b/i,
+  /\b(code|pin)[:\s：]+(\d{4,8})\b/i,
+  /(\d{4,8})\s*(?:is\s*your\s*(?:verification|confirmation|security)?\s*code)/i,
+  /(?:您的?(?:验证码|校验码)是?[:\s：]*)(\d{4,8})/i,
+  /(?:use\s*(?:code|this\s*code)[:\s：]*)(\d{4,8})\b/i,
+];
+
+const FALLBACK_CODE_PATTERN = /\b(\d{4,8})\b/;
+
 function extractVerificationCode(text) {
-  const match = String(text || '').match(/\b(\d{4,8})\b/);
-  return match ? match[1] : '';
+  const str = String(text || '');
+  for (const pattern of CODE_KEYWORD_PATTERNS) {
+    const match = str.match(pattern);
+    if (match) {
+      const code = match[1] || match[2];
+      if (code && /^\d{4,8}$/.test(code)) {
+        return code;
+      }
+    }
+  }
+  const fallback = str.match(FALLBACK_CODE_PATTERN);
+  return fallback ? fallback[1] : '';
 }
 
 function buildMailCodeText(mail = {}) {

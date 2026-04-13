@@ -1148,7 +1148,52 @@ h1 {
   .header-row-bottom {
     grid-template-columns: 72px repeat(3, minmax(0, 1fr));
   }
+}
 
+/* Mail Provider selector */
+select.data-input {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23637083' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+/* Account pool textarea */
+.account-pool-textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  line-height: 1.6;
+  font-size: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  transition: border-color var(--transition);
+}
+
+.account-pool-textarea:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-soft);
+}
+
+.account-pool-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.account-pool-format {
+  font-size: 11px;
+}
+
+@media (max-width: 560px) {
   .step-row {
     grid-template-columns: 28px minmax(0, 1fr) max-content;
   }

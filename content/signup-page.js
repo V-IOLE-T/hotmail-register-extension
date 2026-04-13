@@ -228,6 +228,11 @@ function isSignupLandingPageReady() {
     return false;
   }
 
+  // 明确是登录页 URL → 不是注册落地页
+  if (helpers.isLoginFlowUrl?.(location.href)) {
+    return false;
+  }
+
   const headingCandidates = Array.from(document.querySelectorAll('h1, h2, [role="heading"]'))
     .filter(isVisibleElement)
     .map(getActionText);
@@ -241,6 +246,11 @@ function isSignupLandingPageReady() {
 function isSignupIdentifierPageReady() {
   const emailInput = helpers.getEmailInput();
   if (!emailInput || !isVisibleElement(emailInput)) {
+    return false;
+  }
+
+  // 明确是登录页 URL → 不是注册页
+  if (helpers.isLoginFlowUrl?.(location.href)) {
     return false;
   }
 
