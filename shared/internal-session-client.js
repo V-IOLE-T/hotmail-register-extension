@@ -7,10 +7,19 @@ function buildUrl(baseUrl, pathname, query = {}) {
   return url.toString();
 }
 
+function buildApiError(payload, response) {
+  const error = new Error(payload?.message || payload?.error || `内部接口请求失败 (${response.status})`);
+  error.code = payload?.need_login ? 'INTERNAL_SESSION_LOGIN_REQUIRED' : 'INTERNAL_SESSION_REQUEST_FAILED';
+  error.needLogin = Boolean(payload?.need_login);
+  error.payload = payload || null;
+  error.status = response.status;
+  return error;
+}
+
 async function parseJsonResponse(response) {
   const payload = await response.json();
   if (!response.ok || payload?.success === false) {
-    throw new Error(payload?.message || `内部接口请求失败 (${response.status})`);
+    throw buildApiError(payload, response);
   }
   return payload;
 }

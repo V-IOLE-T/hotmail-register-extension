@@ -103,6 +103,7 @@ let accountSearchResults = [];
 let accountSearchLoading = false;
 let accountSearchRequestId = 0;
 let accountSearchDebounceTimer = null;
+let accountSearchTempEmailStatus = null;
 
 async function call(type, payload) {
   const response = await chrome.runtime.sendMessage({ type, payload });
@@ -317,6 +318,12 @@ function renderAccountPicker(state = latestState) {
 
   if (accountSearchLoading) {
     status.textContent = '正在加载可用邮箱...';
+  } else if (accountSearchTempEmailStatus?.needLogin && !accountSearchResults.length) {
+    status.textContent = '临时邮箱未纳入搜索：请先在当前浏览器登录邮箱后台';
+  } else if (accountSearchTempEmailStatus?.needLogin) {
+    status.textContent = query
+      ? `当前显示 ${accountSearchResults.length} 个匹配邮箱；临时邮箱未纳入搜索，请先登录邮箱后台`
+      : `当前显示前 ${accountSearchResults.length} 个可用邮箱；临时邮箱未纳入搜索，请先登录邮箱后台`;
   } else if (!accountSearchResults.length && query) {
     status.textContent = `没有匹配 “${query}” 的可用邮箱`;
   } else if (!accountSearchResults.length) {
@@ -568,11 +575,13 @@ async function refreshAccountSearchResults({ silent = false } = {}) {
       return;
     }
     accountSearchResults = Array.isArray(data?.accounts) ? data.accounts : [];
+    accountSearchTempEmailStatus = data?.tempEmailStatus || null;
   } catch (error) {
     if (requestId !== accountSearchRequestId) {
       return;
     }
     accountSearchResults = [];
+    accountSearchTempEmailStatus = null;
     if (!silent) {
       showToast(`邮箱搜索失败：${error.message}`, 'error', 3200);
     }

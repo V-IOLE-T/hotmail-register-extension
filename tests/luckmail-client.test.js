@@ -249,6 +249,40 @@ test('listAccounts merges temp emails from internal session client', async () =>
   ]);
 });
 
+test('listAccounts preserves temp email login-required status when internal session is not logged in', async () => {
+  const client = createLuckmailClient({
+    apiKey: 'test-key',
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async () => createJsonResponse({
+      success: true,
+      total: 1,
+      accounts: [
+        {
+          id: 3,
+          email: 'normal@outlook.com',
+          tags: [],
+        },
+      ],
+    }),
+    internalClient: {
+      async listTempEmails() {
+        const error = new Error('请先登录');
+        error.needLogin = true;
+        error.code = 'INTERNAL_SESSION_LOGIN_REQUIRED';
+        throw error;
+      },
+    },
+  });
+
+  const accounts = await client.listAccounts();
+  assert.equal(accounts.length, 1);
+  assert.deepEqual(client.getTempEmailStatus(), {
+    available: false,
+    needLogin: true,
+    message: '请先登录',
+  });
+});
+
 test('listUserEmailMails routes temp emails to internal temp mailbox endpoints', async () => {
   const client = createLuckmailClient({
     apiKey: 'test-key',
@@ -283,6 +317,33 @@ test('listUserEmailMails routes temp emails to internal temp mailbox endpoints',
   assert.equal(result.emails[0].bodyText, 'Your code is 123456');
 });
 
+test('listUserEmailMails does not fall back to external api when temp context is explicit and session is missing', async () => {
+  const client = createLuckmailClient({
+    apiKey: 'test-key',
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async () => {
+      throw new Error('external endpoint should not be used');
+    },
+    internalClient: {
+      async listTempEmailMessages() {
+        const error = new Error('请先登录');
+        error.needLogin = true;
+        error.code = 'INTERNAL_SESSION_LOGIN_REQUIRED';
+        throw error;
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.listUserEmailMails('temp@cstea.shop', { isTemp: true }),
+    (error) => {
+      assert.equal(error.message, '请先登录');
+      assert.equal(error.needLogin, true);
+      return true;
+    }
+  );
+});
+
 test('getEmailDetail routes temp emails to internal temp email detail endpoint', async () => {
   const client = createLuckmailClient({
     apiKey: 'test-key',
@@ -310,4 +371,34 @@ test('getEmailDetail routes temp emails to internal temp email detail endpoint',
   const detail = await client.getEmailDetail('temp@cstea.shop', 'tm1');
   assert.equal(detail.id, 'tm1');
   assert.equal(detail.bodyText, 'Your code is 789012');
+});
+
+test('getEmailDetail does not fall back to normal detail api when temp context is explicit and session is missing', async () => {
+  const client = createLuckmailClient({
+    apiKey: 'test-key',
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async () => {
+      throw new Error('external endpoint should not be used');
+    },
+    internalClient: {
+      async getTempEmailDetail() {
+        const error = new Error('请先登录');
+        error.needLogin = true;
+        error.code = 'INTERNAL_SESSION_LOGIN_REQUIRED';
+        throw error;
+      },
+      async getEmailDetail() {
+        throw new Error('normal detail api should not be used');
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.getEmailDetail('temp@cstea.shop', 'tm1', { isTemp: true }),
+    (error) => {
+      assert.equal(error.message, '请先登录');
+      assert.equal(error.needLogin, true);
+      return true;
+    }
+  );
 });

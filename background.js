@@ -533,7 +533,7 @@ async function syncCurrentAccount(state) {
 
 async function pollCodeForPhase(state, phase) {
   const account = await ensureCurrentAccount(state);
-  await ensureCurrentEmailRecord(state);
+  const emailRecord = await ensureCurrentEmailRecord(state);
   const step = phase === 'signup' ? 4 : 7;
   const phaseLabel = phase === 'signup' ? '注册验证码' : '登录验证码';
   const phaseStartedAt = new Date().toISOString();
@@ -562,6 +562,9 @@ async function pollCodeForPhase(state, phase) {
         timeoutMs: state.pollTimeoutSec * 1000,
         minReceivedAt: minReceivedAt || phaseStartedAt,
         freshnessGraceMs: 15000,
+        mailboxContext: {
+          isTemp: Boolean(account?.isTemp || emailRecord?.isTemp),
+        },
         addLog,
         step,
         round,
@@ -793,7 +796,8 @@ const handlers = {
   },
   async LIST_AVAILABLE_ACCOUNTS(payload) {
     const state = await getState();
-    const accounts = await buildClient(state).listAccounts();
+    const client = buildClient(state);
+    const accounts = await client.listAccounts();
     const availableAccounts = listAvailableAccounts(accounts, state.usedAccounts || {}, {
       query: payload?.query || '',
       limit: 30,
@@ -806,6 +810,7 @@ const handlers = {
     return {
       accounts: availableAccounts,
       selectedAccountAddress: getSelectedAccountAddress(state),
+      tempEmailStatus: client.getTempEmailStatus?.() || null,
     };
   },
   async SELECT_ACCOUNT(payload) {
@@ -870,7 +875,8 @@ const handlers = {
   async PREPARE_NEXT_ACCOUNT() {
     const state = await getState();
     await addLog('准备账号：正在从邮箱平台拉取可用账号...', 'info');
-    const accounts = await buildClient(state).listAccounts();
+    const client = buildClient(state);
+    const accounts = await client.listAccounts();
     const selection = await resolvePinnedAccountSelection(state, accounts)
       || resolveCurrentAccountSelection({
         accounts,
@@ -890,6 +896,11 @@ const handlers = {
       }
       if (skipped.taggedRegistered.length) {
         await addLog(`准备账号：被“已注册”标签跳过的邮箱：${skipped.taggedRegistered.join(', ')}`, 'warn');
+      }
+      const tempEmailStatus = client.getTempEmailStatus?.() || null;
+      if (tempEmailStatus?.needLogin) {
+        await addLog('准备账号：临时邮箱接口当前未登录，本轮未纳入候选账号。请先在同一浏览器登录邮箱后台。', 'warn');
+        throw new Error('临时邮箱接口需要登录态，请先在当前浏览器登录邮箱后台后再重试。');
       }
       throw new Error('没有更多未注册邮箱可用');
     }

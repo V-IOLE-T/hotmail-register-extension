@@ -162,3 +162,30 @@ test('createInternalSessionClient exposes the request url when fetch fails', asy
     /无法连接内部接口：http:\/\/localhost:5000\/api\/csrf-token/
   );
 });
+
+test('listTempEmails exposes login-required errors from internal session api', async () => {
+  const client = createInternalSessionClient({
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          success: false,
+          error: '请先登录',
+          need_login: true,
+        };
+      },
+    }),
+  });
+
+  await assert.rejects(
+    async () => client.listTempEmails(),
+    (error) => {
+      assert.equal(error.message, '请先登录');
+      assert.equal(error.needLogin, true);
+      assert.equal(error.code, 'INTERNAL_SESSION_LOGIN_REQUIRED');
+      return true;
+    }
+  );
+});

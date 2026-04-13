@@ -223,6 +223,54 @@ test('pollVerificationCode fetches message detail when preview does not contain 
   assert.equal(result.extractedFromDetail, true);
 });
 
+test('pollVerificationCode forwards temp mailbox context to list and detail fetchers', async () => {
+  const result = await pollVerificationCode({
+    client: {
+      async listUserEmailMails(email, options = {}) {
+        assert.equal(email, 'temp@cstea.shop');
+        assert.equal(options.isTemp, true);
+        return {
+          resolvedEmail: 'temp@cstea.shop',
+          emails: [
+            {
+              messageId: 'tm1',
+              subject: 'OpenAI verification code',
+              bodyText: 'Open mail body',
+              from: 'noreply@openai.com',
+              receivedAt: '2026-04-12T18:02:00Z',
+              folder: 'inbox',
+            },
+          ],
+        };
+      },
+    },
+    detailFetcher: {
+      async getEmailDetail(email, messageId, options = {}) {
+        assert.equal(email, 'temp@cstea.shop');
+        assert.equal(messageId, 'tm1');
+        assert.equal(options.folder, 'inbox');
+        assert.equal(options.isTemp, true);
+        return {
+          bodyText: 'Your code is 667788',
+        };
+      },
+    },
+    email: 'temp@cstea.shop',
+    mailboxContext: {
+      isTemp: true,
+    },
+    intervalMs: 1,
+    timeoutMs: 10,
+    match: {
+      fromIncludes: 'openai.com',
+      keyword: 'OpenAI',
+      subjectContains: 'OpenAI',
+    },
+  });
+
+  assert.equal(result.code, '667788');
+});
+
 test('pollVerificationCode times out with readable message', async () => {
   await assert.rejects(
     () => pollVerificationCode({

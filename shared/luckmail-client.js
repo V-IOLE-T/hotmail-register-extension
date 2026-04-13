@@ -90,6 +90,42 @@ export function createLuckmailClient({
     throw new Error('邮件平台 Base URL 不能为空');
   }
 
+  let tempEmailStatus = {
+    available: true,
+    needLogin: false,
+    message: '',
+  };
+
+  function resetTempEmailStatus() {
+    tempEmailStatus = {
+      available: true,
+      needLogin: false,
+      message: '',
+    };
+  }
+
+  function setTempEmailErrorStatus(error) {
+    tempEmailStatus = {
+      available: false,
+      needLogin: Boolean(error?.needLogin),
+      message: error?.message || String(error),
+    };
+  }
+
+  async function listTempAccounts() {
+    resetTempEmailStatus();
+    if (!internalClient?.listTempEmails) {
+      return [];
+    }
+
+    try {
+      return (await internalClient.listTempEmails()).map(normalizeTempAccount);
+    } catch (error) {
+      setTempEmailErrorStatus(error);
+      return [];
+    }
+  }
+
   async function request(pathname, query, options = {}) {
     const url = buildUrl(baseUrl, pathname, query);
     let response;
@@ -114,9 +150,7 @@ export function createLuckmailClient({
       group_id: groupId,
     });
     const externalAccounts = (Array.isArray(payload.accounts) ? payload.accounts : []).map(normalizeAccount);
-    const tempAccounts = internalClient?.listTempEmails
-      ? await internalClient.listTempEmails().then((items) => items.map(normalizeTempAccount)).catch(() => [])
-      : [];
+    const tempAccounts = await listTempAccounts();
     return [...externalAccounts, ...tempAccounts].filter((account) => account.address);
   }
 
@@ -160,12 +194,25 @@ export function createLuckmailClient({
     subjectContains = '',
     fromContains = '',
     keyword = '',
+    isTemp = false,
   } = {}) {
     const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (isTemp && internalClient?.listTempEmailMessages) {
+      const emails = await internalClient.listTempEmailMessages(normalizedEmail);
+      return {
+        emails: emails.map(normalizeMail),
+        partial: false,
+        details: null,
+        requestedEmail: email,
+        resolvedEmail: normalizedEmail,
+        matchedAlias: '',
+        hasMore: false,
+      };
+    }
+
     if (internalClient?.listTempEmails && internalClient?.listTempEmailMessages) {
-      const tempAccounts = await internalClient.listTempEmails().catch(() => []);
+      const tempAccounts = await listTempAccounts();
       const matchedTempAccount = tempAccounts
-        .map(normalizeTempAccount)
         .find((account) => account.address === normalizedEmail);
       if (matchedTempAccount) {
         const emails = await internalClient.listTempEmailMessages(matchedTempAccount.address);
@@ -204,10 +251,23 @@ export function createLuckmailClient({
 
   async function getEmailDetail(email, messageId, options = {}) {
     const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (options?.isTemp && internalClient?.getTempEmailDetail) {
+      const detail = await internalClient.getTempEmailDetail(normalizedEmail, messageId);
+      return {
+        id: detail.id || detail.message_id || messageId,
+        subject: detail.subject || '',
+        body: detail.body || detail.html || detail.body_html || '',
+        bodyText: detail.body_text || detail.body_preview || detail.text || detail.body || '',
+        bodyType: detail.body_type || '',
+        from: detail.from || '',
+        to: detail.to || '',
+        date: detail.date || detail.received_at || '',
+      };
+    }
+
     if (internalClient?.listTempEmails && internalClient?.getTempEmailDetail) {
-      const tempAccounts = await internalClient.listTempEmails().catch(() => []);
+      const tempAccounts = await listTempAccounts();
       const matchedTempAccount = tempAccounts
-        .map(normalizeTempAccount)
         .find((account) => account.address === normalizedEmail);
       if (matchedTempAccount) {
         const detail = await internalClient.getTempEmailDetail(matchedTempAccount.address, messageId);
@@ -238,5 +298,6 @@ export function createLuckmailClient({
     findUserEmailByAddress,
     listUserEmailMails,
     getEmailDetail,
+    getTempEmailStatus: () => ({ ...tempEmailStatus }),
   };
 }

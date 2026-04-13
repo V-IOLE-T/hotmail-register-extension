@@ -58,6 +58,7 @@ export async function pollVerificationCode({
   client,
   detailFetcher = null,
   email,
+  mailboxContext = {},
   intervalMs = 3000,
   timeoutMs = 30000,
   minReceivedAt = '',
@@ -94,6 +95,7 @@ export async function pollVerificationCode({
     try {
       const detail = await detailFetcher.getEmailDetail(resolvedEmail || email, mail.messageId, {
         folder: mail.folder || 'inbox',
+        isTemp: Boolean(mailboxContext?.isTemp),
       });
       const detailCode = extractVerificationCode(`${detail.subject || ''} ${detail.bodyText || ''} ${detail.body || ''}`);
       if (!detailCode) {
@@ -130,6 +132,7 @@ export async function pollVerificationCode({
       subjectContains: match.subjectContains,
       fromContains: match.fromIncludes,
       keyword: match.keyword,
+      isTemp: Boolean(mailboxContext?.isTemp),
     });
     const matchingMails = (result.emails || []).filter((mail) => matchesMail(mail, match));
     if (matchingMails.length > 0) {

@@ -1,5 +1,175 @@
 # HANDOFF
 
+## 2026-04-13 临时邮箱取信错误回退补充（以下内容补充最新状态）
+
+- 补充时间：2026-04-13
+- 触发背景：
+  - 已确认临时邮箱接口文档定义为：
+    - 列表：`GET /api/temp-emails`
+    - 邮件：`GET /api/temp-emails/<email>/messages`
+    - 详情：`GET /api/temp-emails/<email>/messages/<message_id>`
+  - 但原实现里，验证码轮询与详情提取并不是基于“当前账号已知是临时邮箱”分流
+  - 而是每次重新拉一次 `/api/temp-emails` 猜测目标邮箱是否属于临时邮箱
+
+### 本次确认的根因
+
+- `shared/luckmail-client.js`
+  - `listUserEmailMails()` / `getEmailDetail()` 之前的逻辑是：
+    - 先调用 `listTempEmails()`
+    - 只有在返回列表里再次命中邮箱，才走 temp mailbox 接口
+    - 否则回退到普通邮箱接口：
+      - `/api/external/emails`
+      - `/api/email/...`
+- 结果：
+  - 如果当前账号本来就是 `isTemp=true`
+  - 但浏览器 session 恰好失效，`listTempEmails()` 会失败或拿不到列表
+  - 后续代码就会错误回退到普通邮箱接口
+  - 这与 API 文档语义不符，因为临时邮箱不应该被重新识别成普通邮箱
+
+### 本次修复
+
+- `shared/luckmail-client.js`
+  - `listUserEmailMails(email, options)` 新增：
+    - `options.isTemp`
+  - `getEmailDetail(email, messageId, options)` 复用：
+    - `options.isTemp`
+  - 当 `isTemp === true` 时：
+    - 直接调用 temp mailbox 接口
+    - `listUserEmailMails()` → `listTempEmailMessages(email)`
+    - `getEmailDetail()` → `getTempEmailDetail(email, messageId)`
+    - 不再先重查 `/api/temp-emails`
+    - 也不再 fallback 到普通邮箱接口
+
+- `shared/verification-poller.js`
+  - 新增 `mailboxContext`
+  - 轮询列表与详情提取时会把 `isTemp` 继续透传给 client / detailFetcher
+
+- `background.js`
+  - `pollCodeForPhase()` 现在会根据：
+    - `currentAccount.isTemp`
+    - `currentEmailRecord.isTemp`
+  - 构造 `mailboxContext.isTemp`
+  - 这样验证码轮询阶段已经知道当前邮箱类型，不会再“重新猜”
+
+### 修复后的行为
+
+- 已知临时邮箱：
+  - 始终只走 `/api/temp-emails/...` 相关接口
+  - 若 session 失效，会直接抛出原始登录态错误
+  - 不会再错误回退到 `/api/external/emails` 或 `/api/email/...`
+
+- 普通邮箱：
+  - 保持原行为不变
+
+### 本次修改的关键文件
+
+- `shared/luckmail-client.js`
+- `shared/verification-poller.js`
+- `background.js`
+- `tests/luckmail-client.test.js`
+- `tests/verification-poller.test.js`
+
+### fresh 验证证据
+
+```bash
+node --test tests/luckmail-client.test.js tests/verification-poller.test.js
+node --check shared/luckmail-client.js
+node --check shared/verification-poller.js
+node --check background.js
+npm test
+```
+
+结果：
+
+- 新增的“已知 temp 账号禁止 fallback”测试通过
+- 新增的 `mailboxContext.isTemp` 透传测试通过
+- 全量 `128/128` 通过
+
+## 2026-04-13 临时邮箱搜索静默吞错补充（以下内容补充最新状态）
+
+- 补充时间：2026-04-13
+- 触发背景：
+  - 用户在“指定邮箱”里搜索临时邮箱地址时，界面提示：
+    - `没有匹配 "<temp-email>" 的可用邮箱`
+  - 但从浏览器 Network 可见：
+    - `/api/temp-emails` 返回 `{ error: '请先登录', need_login: true, success: false }`
+
+### 本次确认的根因
+
+- 临时邮箱接口本身不是“没有数据”，而是“缺少当前浏览器登录态”：
+  - `shared/internal-session-client.js`
+    - 之前对 `success: false` 只读 `payload.message`
+    - 没有读取接口真实返回的 `payload.error`
+    - 也没有保留 `need_login`
+- `shared/luckmail-client.js`
+  - `listAccounts()` 在拉临时邮箱时把内部接口异常直接 `.catch(() => [])`
+  - 结果：
+    - 临时邮箱接口登录失效时被静默吞掉
+    - Side Panel 只能看到“没有匹配”
+    - 自动选号也会把“临时邮箱未纳入候选”误表现成“没有更多邮箱”
+
+### 本次修复
+
+- `shared/internal-session-client.js`
+  - 为内部接口错误补充结构化信息：
+    - `error.message` 优先取 `payload.message || payload.error`
+    - `error.needLogin`
+    - `error.code = INTERNAL_SESSION_LOGIN_REQUIRED | INTERNAL_SESSION_REQUEST_FAILED`
+
+- `shared/luckmail-client.js`
+  - 新增临时邮箱状态缓存：
+    - `getTempEmailStatus()`
+  - `listAccounts()` 仍允许普通邮箱继续工作
+  - 但不会再把临时邮箱登录态问题完全吞掉，而是保留：
+    - `available`
+    - `needLogin`
+    - `message`
+
+- `background.js`
+  - `LIST_AVAILABLE_ACCOUNTS` 现在会把 `tempEmailStatus` 一并返回给 sidepanel
+  - `PREPARE_NEXT_ACCOUNT` 在“没有候选邮箱”且临时邮箱接口明确 `need_login` 时，会直接报更准确的错误：
+    - `临时邮箱接口需要登录态，请先在当前浏览器登录邮箱后台后再重试。`
+
+- `sidepanel/sidepanel.js`
+  - 搜索区状态文案新增临时邮箱登录提示
+  - 不再把这类情况误显示成“没有匹配”
+
+### 当前行为
+
+- 若临时邮箱接口缺少登录态：
+  - 指定邮箱搜索区会提示：
+    - `临时邮箱未纳入搜索：请先在当前浏览器登录邮箱后台`
+  - 自动选号若此时没有普通邮箱可选，会直接报登录态错误，而不是“没有更多邮箱”
+
+- 若同一浏览器中的邮箱后台已登录且接口能拿到 session：
+  - 临时邮箱仍会继续并入候选账号池
+
+### 本次修改的关键文件
+
+- `shared/internal-session-client.js`
+- `shared/luckmail-client.js`
+- `background.js`
+- `sidepanel/sidepanel.js`
+- `tests/internal-session-client.test.js`
+- `tests/luckmail-client.test.js`
+
+### fresh 验证证据
+
+```bash
+node --test tests/internal-session-client.test.js tests/luckmail-client.test.js
+node --check shared/internal-session-client.js
+node --check shared/luckmail-client.js
+node --check background.js
+node --check sidepanel/sidepanel.js
+npm test
+```
+
+结果：
+
+- 新增的登录态错误透传测试通过
+- 定向语法检查通过
+- 全量 `125/125` 通过
+
 ## 2026-04-13 第二轮卡在 OAuth 登录页补充（以下内容补充最新状态）
 
 - 补充时间：2026-04-13
