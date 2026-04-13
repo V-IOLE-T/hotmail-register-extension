@@ -11,6 +11,7 @@ import { createAutoRunPausedError } from './shared/auto-run-control.js';
 import { buildAutoRestartRuntimeUpdates } from './shared/auto-restart.js';
 import { createInternalSessionClient } from './shared/internal-session-client.js';
 import { createLuckmailClient } from './shared/luckmail-client.js';
+import { createAppleEmailClient } from './shared/appleemail-client.js';
 import { resolveLoginPassword } from './shared/login-password.js';
 import { createContentStepSignalRegistry, settleStepWaiterFromDispatchResult } from './shared/content-step-signals.js';
 import { chooseOauthTabCandidate, listAuthTabIds } from './shared/open-oauth-target.js';
@@ -210,6 +211,12 @@ async function runContentDrivenStep(step, action, messages = {}) {
 }
 
 function buildClient(settings) {
+  if (settings.mailProvider === 'appleemail') {
+    return createAppleEmailClient({
+      baseUrl: settings.appleEmailBaseUrl || 'https://www.appleemail.top',
+      accountPoolText: settings.accountPoolText || '',
+    });
+  }
   return createLuckmailClient({
     apiKey: settings.apiKey,
     baseUrl: settings.mailApiBaseUrl,
@@ -217,6 +224,10 @@ function buildClient(settings) {
       ? createInternalSessionClient({ baseUrl: settings.mailApiBaseUrl })
       : null,
   });
+}
+
+function isAppleEmailProvider(state = {}) {
+  return state.mailProvider === 'appleemail';
 }
 
 function getSelectedAccountAddress(state = {}) {
@@ -248,7 +259,9 @@ async function resolvePinnedAccountSelection(state, accounts = []) {
 
 async function resolveCurrentAccount(state) {
   const client = buildClient(state);
-  const accounts = await client.listAccounts();
+  const accounts = isAppleEmailProvider(state)
+    ? await client.listAccounts()
+    : await client.listAccounts();
   const selection = await resolvePinnedAccountSelection(state, accounts)
     || resolveCurrentAccountSelection({
       accounts,
@@ -257,7 +270,10 @@ async function resolveCurrentAccount(state) {
     });
   const account = selection?.account || null;
   if (!account) {
-    throw new Error('没有可用邮箱，可能 Outlook API 中的邮箱都已打上“已注册”标签或已被跳过');
+    if (isAppleEmailProvider(state)) {
+      throw new Error('没有可用邮箱，AppleEmail 账号池中的邮箱可能都已被标记为已使用');
+    }
+    throw new Error('没有可用邮箱，可能 Outlook API 中的邮箱都已打上"已注册"标签或已被跳过');
   }
   await setRuntime({
     currentAccount: account,
@@ -521,6 +537,9 @@ async function sendToReadySource(source, tabId, message, timeoutMs = 15000) {
 }
 
 async function syncCurrentAccount(state) {
+  if (isAppleEmailProvider(state)) {
+    return { skipped: true, message: 'AppleEmail 不支持邮箱同步' };
+  }
   const account = await ensureCurrentAccount(state);
   const client = buildClient(state);
   return client.importEmails('ms_graph', [{
@@ -654,6 +673,10 @@ async function getSessionCookiesForBaseUrl(baseUrl) {
 }
 
 async function syncRegisteredTagForState(state, account) {
+  if (isAppleEmailProvider(state)) {
+    await addLog('已注册标签同步跳过：AppleEmail 不支持标签 API，仅使用本地记录', 'info');
+    return { skipped: true, reason: 'appleemail_no_tags' };
+  }
   const record = state.currentEmailRecord;
   if (account?.isTemp || record?.isTemp) {
     await addLog('已注册标签同步跳过：当前账号属于临时邮箱来源', 'info');
@@ -790,8 +813,13 @@ const handlers = {
   },
   async PARSE_ACCOUNT_POOL(payload) {
     const state = await getState();
-    const accounts = await buildClient(state).listAccounts();
-    await addLog(`邮箱池已从 Outlook API 拉取完成，共 ${accounts.length} 条`, 'ok');
+    const client = buildClient(state);
+    const accounts = await client.listAccounts();
+    if (isAppleEmailProvider(state)) {
+      await addLog(`AppleEmail 账号池解析完成，共 ${accounts.length} 条`, 'ok');
+    } else {
+      await addLog(`邮箱池已从 Outlook API 拉取完成，共 ${accounts.length} 条`, 'ok');
+    }
     return { count: accounts.length, first: accounts[0] || null };
   },
   async LIST_AVAILABLE_ACCOUNTS(payload) {
