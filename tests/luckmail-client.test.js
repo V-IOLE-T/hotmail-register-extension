@@ -23,7 +23,7 @@ test('findUserEmailByAddress matches primary email', async () => {
       accounts: [
         {
           id: 2,
-          email: 'target@hotmail.com',
+          email: 'target@example.com',
           aliases: ['alias@example.com'],
           tags: [{ id: 1, name: '核心' }],
         },
@@ -31,9 +31,9 @@ test('findUserEmailByAddress matches primary email', async () => {
     }),
   });
 
-  const record = await client.findUserEmailByAddress('target@hotmail.com');
+  const record = await client.findUserEmailByAddress('target@example.com');
   assert.equal(record.id, 2);
-  assert.equal(record.address, 'target@hotmail.com');
+  assert.equal(record.address, 'target@example.com');
   assert.equal(record.tags.length, 1);
 });
 
@@ -47,7 +47,7 @@ test('findUserEmailByAddress matches alias email', async () => {
       accounts: [
         {
           id: 2,
-          email: 'target@hotmail.com',
+          email: 'target@example.com',
           aliases: ['alias@example.com'],
         },
       ],
@@ -55,7 +55,7 @@ test('findUserEmailByAddress matches alias email', async () => {
   });
 
   const record = await client.findUserEmailByAddress('alias@example.com');
-  assert.equal(record.address, 'target@hotmail.com');
+  assert.equal(record.address, 'target@example.com');
   assert.deepEqual(record.aliases, ['alias@example.com']);
 });
 
@@ -130,12 +130,12 @@ test('findFirstUnregisteredAccount returns the first account without 已注册 t
       accounts: [
         {
           id: 2,
-          email: 'registered@hotmail.com',
+          email: 'registered@example.com',
           tags: [{ id: 8, name: '已注册' }],
         },
         {
           id: 3,
-          email: 'fresh@hotmail.com',
+          email: 'fresh@example.com',
           password: 'mail-pass',
           client_id: 'cid-3',
           refresh_token: 'rt-3',
@@ -146,7 +146,7 @@ test('findFirstUnregisteredAccount returns the first account without 已注册 t
   });
 
   const account = await client.findFirstUnregisteredAccount();
-  assert.equal(account.address, 'fresh@hotmail.com');
+  assert.equal(account.address, 'fresh@example.com');
   assert.equal(account.password, 'mail-pass');
   assert.equal(account.clientId, 'cid-3');
   assert.equal(account.refreshToken, 'rt-3');
@@ -162,12 +162,12 @@ test('findFirstUnregisteredAccount skips excluded addresses', async () => {
       accounts: [
         {
           id: 3,
-          email: 'fresh@hotmail.com',
+          email: 'fresh@example.com',
           tags: [{ id: 2, name: '核心' }],
         },
         {
           id: 4,
-          email: 'next@hotmail.com',
+          email: 'next@example.com',
           tags: [],
         },
       ],
@@ -175,9 +175,9 @@ test('findFirstUnregisteredAccount skips excluded addresses', async () => {
   });
 
   const account = await client.findFirstUnregisteredAccount({
-    excludedAddresses: ['fresh@hotmail.com'],
+    excludedAddresses: ['fresh@example.com'],
   });
-  assert.equal(account.address, 'next@hotmail.com');
+  assert.equal(account.address, 'next@example.com');
 });
 
 test('findFirstUnregisteredAccount can skip multiple excluded addresses including current account', async () => {
@@ -190,17 +190,17 @@ test('findFirstUnregisteredAccount can skip multiple excluded addresses includin
       accounts: [
         {
           id: 3,
-          email: 'current@hotmail.com',
+          email: 'current@example.com',
           tags: [],
         },
         {
           id: 4,
-          email: 'completed@hotmail.com',
+          email: 'completed@example.com',
           tags: [],
         },
         {
           id: 5,
-          email: 'next@hotmail.com',
+          email: 'next@example.com',
           tags: [],
         },
       ],
@@ -208,9 +208,9 @@ test('findFirstUnregisteredAccount can skip multiple excluded addresses includin
   });
 
   const account = await client.findFirstUnregisteredAccount({
-    excludedAddresses: ['current@hotmail.com', 'completed@hotmail.com'],
+    excludedAddresses: ['current@example.com', 'completed@example.com'],
   });
-  assert.equal(account.address, 'next@hotmail.com');
+  assert.equal(account.address, 'next@example.com');
 });
 
 test('listAccounts merges temp emails from internal session client', async () => {
@@ -223,7 +223,7 @@ test('listAccounts merges temp emails from internal session client', async () =>
       accounts: [
         {
           id: 3,
-          email: 'normal@outlook.com',
+          email: 'normal@example.com',
           tags: [],
         },
       ],
@@ -244,7 +244,7 @@ test('listAccounts merges temp emails from internal session client', async () =>
   const accounts = await client.listAccounts();
   assert.equal(accounts.length, 2);
   assert.deepEqual(accounts.map((item) => [item.address, item.source, item.isTemp]), [
-    ['normal@outlook.com', 'external', false],
+    ['normal@example.com', 'external', false],
     ['temp@cstea.shop', 'temp', true],
   ]);
 });
@@ -259,7 +259,7 @@ test('listAccounts preserves temp email login-required status when internal sess
       accounts: [
         {
           id: 3,
-          email: 'normal@outlook.com',
+          email: 'normal@example.com',
           tags: [],
         },
       ],
@@ -280,6 +280,51 @@ test('listAccounts preserves temp email login-required status when internal sess
     available: false,
     needLogin: true,
     message: '请先登录',
+  });
+});
+
+test('listAccounts keeps external microsoft mailbox as the original address', async () => {
+  const client = createLuckmailClient({
+    apiKey: 'test-key',
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async () => createJsonResponse({
+      success: true,
+      total: 1,
+      accounts: [
+        {
+          id: 3,
+          email: 'normal@outlook.com',
+          tags: [{ id: 8, name: '已注册' }],
+        },
+      ],
+    }),
+  });
+
+  const accounts = await client.listAccounts();
+  assert.equal(accounts.length, 1);
+  assert.deepEqual(accounts[0], {
+    id: 3,
+    address: 'normal@outlook.com',
+    baseAddress: 'normal@outlook.com',
+    aliases: [],
+    password: '',
+    clientId: '',
+    refreshToken: '',
+    groupId: 0,
+    groupName: '',
+    tags: [{ id: 8, name: '已注册' }],
+    status: '',
+    provider: '',
+    source: 'external',
+    isTemp: false,
+    requestedEmail: '',
+    resolvedEmail: 'normal@outlook.com',
+    matchedAlias: '',
+    isAlias: false,
+    aliasIndex: null,
+    aliasSuffix: '',
+    displayAddress: 'normal@outlook.com',
+    ignoreRegisteredTag: false,
   });
 });
 

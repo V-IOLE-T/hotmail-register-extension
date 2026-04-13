@@ -20,7 +20,7 @@ export function getStep9StatusOutcome({
   texts = [],
   now = 0,
   pendingConflictSeenAt = 0,
-  pendingConflictGraceMs = 12000,
+  pendingConflictGraceMs = 4000,
 } = {}) {
   const successText = findMatchingText(texts, SUCCESS_PATTERN);
   if (successText) {

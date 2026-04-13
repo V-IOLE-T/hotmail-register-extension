@@ -18,6 +18,7 @@ import { chooseOauthTabCandidate, listAuthTabIds } from './shared/open-oauth-tar
 import { findLoopbackCallbackUrl } from './shared/oauth-step-helpers-core.js';
 import { decideOauthTabNavigation } from './shared/oauth-tab-navigation.js';
 import { buildPanelTabOpenPlan } from './shared/panel-tab-plan.js';
+import { generateRandomProfile } from './shared/profile-generator.js';
 import { decideStep8ClickPlan } from './shared/step8-click-plan.js';
 import { pollVerificationCode } from './shared/verification-poller.js';
 import { createReadyCommandQueue } from './shared/ready-command-queue.js';
@@ -64,12 +65,14 @@ async function setRuntime(updates) {
   await chrome.storage.session.set(updates);
 }
 
-async function resetTransientRuntime() {
+async function resetTransientRuntime({ preserveSelectedAccountAddress = false } = {}) {
   await setRuntime({
-    selectedAccountAddress: '',
+    ...(preserveSelectedAccountAddress ? {} : { selectedAccountAddress: '' }),
     currentAccount: null,
     currentEmailRecord: null,
+    currentProfile: null,
     authTabId: null,
+    callbackTabId: null,
     localhostUrl: '',
     lastSignupCode: '',
     lastLoginCode: '',
@@ -253,6 +256,7 @@ async function resolvePinnedAccountSelection(state, accounts = []) {
     selectedAccountAddress: '',
     currentAccount: null,
     currentEmailRecord: null,
+    currentProfile: null,
   });
   throw new Error(`手动指定邮箱不可用：${selectedAddress}，它可能已被标记为已使用或已注册`);
 }
@@ -278,12 +282,32 @@ async function resolveCurrentAccount(state) {
   await setRuntime({
     currentAccount: account,
     currentAccountIndex: selection.index,
+    currentProfile: null,
   });
   return account;
 }
 
 async function ensureCurrentAccount(state) {
   return state.currentAccount || resolveCurrentAccount(state);
+}
+
+async function resolveCurrentProfile(state, accountInput = null) {
+  const account = accountInput || await ensureCurrentAccount(state);
+  const normalizedAddress = String(account?.address || '').trim().toLowerCase();
+  if (!normalizedAddress) {
+    throw new Error('当前账号缺少邮箱地址，无法生成资料');
+  }
+
+  if (state?.currentProfile?.accountAddress === normalizedAddress) {
+    return state.currentProfile;
+  }
+
+  const generatedProfile = {
+    accountAddress: normalizedAddress,
+    ...generateRandomProfile(),
+  };
+  await setRuntime({ currentProfile: generatedProfile });
+  return generatedProfile;
 }
 
 async function ensureCurrentEmailRecord(state) {
@@ -293,9 +317,10 @@ async function ensureCurrentEmailRecord(state) {
 
   const account = await ensureCurrentAccount(state);
   const client = buildClient(state);
-  const record = await client.findUserEmailByAddress(account.address);
+  const mailboxAddress = String(account?.baseAddress || account?.address || '').trim().toLowerCase();
+  const record = await client.findUserEmailByAddress(mailboxAddress);
   if (!record) {
-    throw new Error(`邮件平台中未找到邮箱或别名：${account.address}`);
+    throw new Error(`邮件平台中未找到邮箱或别名：${mailboxAddress}`);
   }
 
   await setRuntime({ currentEmailRecord: record });
@@ -480,6 +505,37 @@ async function closeAuthTabs() {
   return authTabIds.length;
 }
 
+async function closeCallbackTabs({ callbackTabId = null, localhostUrl = '' } = {}) {
+  const tabs = await chrome.tabs.query({});
+  const callbackTabIds = new Set();
+  const normalizedLocalhostUrl = String(localhostUrl || '').trim();
+
+  if (Number.isInteger(callbackTabId) && callbackTabId > 0) {
+    callbackTabIds.add(callbackTabId);
+  }
+
+  tabs.forEach((tab) => {
+    const tabUrl = String(tab.url || '');
+    if (!tab.id) {
+      return;
+    }
+    if (normalizedLocalhostUrl && tabUrl === normalizedLocalhostUrl) {
+      callbackTabIds.add(tab.id);
+      return;
+    }
+    if (findLoopbackCallbackUrl([tabUrl])) {
+      callbackTabIds.add(tab.id);
+    }
+  });
+
+  if (!callbackTabIds.size) {
+    return 0;
+  }
+
+  await chrome.tabs.remove([...callbackTabIds]).catch(() => {});
+  return callbackTabIds.size;
+}
+
 async function openOrReusePanelTab(source, url, files, options = {}) {
   if (!url) {
     throw new Error('缺少面板地址');
@@ -557,6 +613,10 @@ async function pollCodeForPhase(state, phase) {
   const phaseLabel = phase === 'signup' ? '注册验证码' : '登录验证码';
   const phaseStartedAt = new Date().toISOString();
   const client = buildClient(state);
+  const mailboxAddress = String(account?.baseAddress || account?.address || '').trim().toLowerCase();
+  if (account?.isAlias) {
+    await addLog(`步骤 ${step}：当前注册别名 ${account.address}，当前取码原邮箱 ${mailboxAddress}。`, 'info');
+  }
   const result = await pollVerificationCodeWithResend({
     step,
     maxRounds: 3,
@@ -573,10 +633,10 @@ async function pollCodeForPhase(state, phase) {
     },
     pollVerificationCode: async ({ minReceivedAt, round }) => {
       await ensureAutoFlowActive();
-      return pollVerificationCode({
-        client,
-        detailFetcher: client,
-        email: account.address,
+        return pollVerificationCode({
+          client,
+          detailFetcher: client,
+          email: mailboxAddress,
         intervalMs: state.pollIntervalSec * 1000,
         timeoutMs: state.pollTimeoutSec * 1000,
         minReceivedAt: minReceivedAt || phaseStartedAt,
@@ -707,8 +767,8 @@ async function syncRegisteredTagForState(state, account) {
   });
   await addLog(
     result.created
-      ? `已创建并打上“已注册”标签：${account.address}`
-      : `已同步“已注册”标签：${account.address}`,
+      ? `已创建并打上“已注册”标签：${account.baseAddress || account.address}${account.isAlias ? `（当前注册别名 ${account.address}）` : ''}`
+      : `已同步“已注册”标签：${account.baseAddress || account.address}${account.isAlias ? `（当前注册别名 ${account.address}）` : ''}`,
     'ok'
   );
   return result;
@@ -719,6 +779,7 @@ async function runAutoFlow({ resume = false } = {}) {
   const totalRuns = resume && state.autoTotalRuns ? state.autoTotalRuns : state.runCount;
   const startIndex = resume && state.autoPaused ? Math.max(0, (state.autoCurrentRun || 1) - 1) : 0;
   let restartTriggered = false;
+  await resetTransientRuntime({ preserveSelectedAccountAddress: true });
   await resetStepStatuses();
   await setRuntime({
     autoRunning: true,
@@ -831,9 +892,13 @@ const handlers = {
       limit: 30,
     }).map((account) => ({
       address: account.address,
+      baseAddress: account.baseAddress || account.address,
       provider: account.provider || '',
       groupName: account.groupName || '',
       isTemp: Boolean(account.isTemp),
+      isAlias: Boolean(account.isAlias),
+      aliasIndex: Number.isInteger(account.aliasIndex) ? account.aliasIndex : null,
+      displayAddress: account.displayAddress || account.address,
     }));
     return {
       accounts: availableAccounts,
@@ -850,6 +915,7 @@ const handlers = {
         selectedAccountAddress: '',
         currentAccount: null,
         currentEmailRecord: null,
+        currentProfile: null,
       });
       await addLog('已清除手动指定邮箱', 'info');
       return { selectedAccountAddress: '' };
@@ -866,6 +932,7 @@ const handlers = {
       currentAccount: selection.account,
       currentAccountIndex: selection.index,
       currentEmailRecord: null,
+      currentProfile: null,
     });
     await addLog(`已手动指定邮箱：${selection.account.address}`, 'ok');
     return {
@@ -939,8 +1006,14 @@ const handlers = {
       currentAccount: match,
       currentAccountIndex: selection.index,
       currentEmailRecord: null,
+      currentProfile: null,
     });
-    await addLog(`当前账号：${match.address}`, 'ok');
+    await addLog(
+      match.isAlias
+        ? `当前账号：注册别名 ${match.address}（取码原邮箱 ${match.baseAddress}，别名 ${Number(match.aliasIndex) + 1}/5）`
+        : `当前账号：${match.address}`,
+      'ok'
+    );
     return match;
   },
   async ADVANCE_ACCOUNT() {
@@ -961,8 +1034,14 @@ const handlers = {
       currentAccountIndex: selection.index,
       currentAccount: nextAccount,
       currentEmailRecord: null,
+      currentProfile: null,
     });
-    await addLog(`当前账号：${nextAccount.address}`, 'ok');
+    await addLog(
+      nextAccount.isAlias
+        ? `当前账号：注册别名 ${nextAccount.address}（取码原邮箱 ${nextAccount.baseAddress}，别名 ${Number(nextAccount.aliasIndex) + 1}/5）`
+        : `当前账号：${nextAccount.address}`,
+      'ok'
+    );
     return nextAccount;
   },
   async COMPLETE_CURRENT_ACCOUNT() {
@@ -975,12 +1054,26 @@ const handlers = {
     } catch (error) {
       await addLog(`已注册标签同步失败：${error.message || String(error)}`, 'warn');
     }
-    const closedAuthTabs = await closeAuthTabs();
+    const [closedAuthTabs, closedCallbackTabs] = await Promise.all([
+      closeAuthTabs(),
+      closeCallbackTabs({
+        callbackTabId: state.callbackTabId,
+        localhostUrl: state.localhostUrl,
+      }),
+    ]);
     await resetTransientRuntime();
     if (closedAuthTabs) {
       await addLog(`已关闭 ${closedAuthTabs} 个 OpenAI 认证页标签`, 'info');
     }
-    await addLog(`已标记邮箱为已使用：${account.address}`, 'ok');
+    if (closedCallbackTabs) {
+      await addLog(`已关闭 ${closedCallbackTabs} 个 localhost 回调页标签`, 'info');
+    }
+    await addLog(
+      account.isAlias
+        ? `已标记别名为已使用：${account.address}（原邮箱 ${account.baseAddress}）`
+        : `已标记邮箱为已使用：${account.address}`,
+      'ok'
+    );
     return { address: account.address, status: 'completed' };
   },
   async RESET_ACCOUNT_LEDGER() {
@@ -1135,10 +1228,15 @@ const handlers = {
   },
   async FIND_CURRENT_EMAIL_RECORD() {
     const state = await getState();
+    const account = await ensureCurrentAccount(state);
     const record = await ensureCurrentEmailRecord(state);
-    const hitText = record.matchedAlias
-      ? `已定位平台邮箱记录：${record.address}（别名命中 ${record.matchedAlias}）`
-      : `已定位平台邮箱记录：${record.address}`;
+    const registerAddress = account?.address || '';
+    const mailboxAddress = account?.baseAddress || account?.address || '';
+    const hitText = account?.isAlias
+      ? `已定位平台原邮箱记录：${record.address}（当前注册别名 ${registerAddress}，取码原邮箱 ${mailboxAddress}）`
+      : (record.matchedAlias
+        ? `已定位平台邮箱记录：${record.address}（别名命中 ${record.matchedAlias}）`
+        : `已定位平台邮箱记录：${record.address}`);
     await addLog(hitText, 'ok');
     return record;
   },
@@ -1167,6 +1265,7 @@ const handlers = {
           payload,
           state,
           ensureCurrentAccount,
+          resolveCurrentProfile,
           openOauthUrl,
           addLog,
           sendToActiveAuthTab,
@@ -1194,17 +1293,23 @@ const handlers = {
           }
         };
 
-        const finishStep8WithCallbackUrl = async (url) => {
+        const finishStep8WithCallbackUrl = async (url, callbackTabId = null) => {
           const matchedUrl = findLoopbackCallbackUrl([url]);
           if (!matchedUrl || resolved) return false;
 
           resolved = true;
           cleanupListener();
           clearTimeout(timeout);
-          await setRuntime({ localhostUrl: matchedUrl });
+          await setRuntime({
+            localhostUrl: matchedUrl,
+            callbackTabId: Number.isInteger(callbackTabId) && callbackTabId > 0 ? callbackTabId : null,
+          });
           await setStepStatus(8, 'completed');
           await addLog(`步骤 8：已捕获 localhost 回调 ${matchedUrl.slice(0, 80)}...`, 'ok');
-          resolve({ localhostUrl: matchedUrl });
+          resolve({
+            localhostUrl: matchedUrl,
+            callbackTabId: Number.isInteger(callbackTabId) && callbackTabId > 0 ? callbackTabId : null,
+          });
           return true;
         };
 
@@ -1218,7 +1323,7 @@ const handlers = {
         webNavListener = (details) => {
           const matchedUrl = findLoopbackCallbackUrl([details.url]);
           if (matchedUrl) {
-            void finishStep8WithCallbackUrl(matchedUrl);
+            void finishStep8WithCallbackUrl(matchedUrl, details.tabId);
           }
         };
 
@@ -1266,7 +1371,7 @@ const handlers = {
               const tab = await chrome.tabs.get(authTab.id).catch(() => null);
               const matchedUrl = findLoopbackCallbackUrl([tab?.url || '']);
               if (matchedUrl) {
-                await finishStep8WithCallbackUrl(matchedUrl);
+                await finishStep8WithCallbackUrl(matchedUrl, tab?.id || authTab.id);
                 return;
               }
               await new Promise((resume) => setTimeout(resume, 250));
@@ -1312,6 +1417,7 @@ const handlers = {
         payload,
         state,
         ensureCurrentAccount,
+        resolveCurrentProfile,
         openOauthUrl,
         addLog,
         sendToActiveAuthTab: step === 3 ? sendToActiveAuthTabOnce : sendToActiveAuthTab,

@@ -1,5 +1,11 @@
 import { isAutoRunPausedError } from './auto-run-control.js';
 
+const AUTO_PAGE_SETTLE_MS = 1200;
+
+async function waitForAutoPageSettle() {
+  await new Promise((resolve) => setTimeout(resolve, AUTO_PAGE_SETTLE_MS));
+}
+
 async function continueFromLoginAfterStep3({ addLog, checkAutoControl, executeSignupStep, pollVerificationCode, fillLastCode } = {}) {
   await addLog('步骤 3：检测到当前邮箱已注册，切换到登录流程并跳过注册验证码与资料填写');
   await checkAutoControl();
@@ -47,8 +53,10 @@ export async function runSingleAutoFlow({ actions = {} } = {}) {
   await addLog('阶段 2：打开认证页面并进入注册流程');
   // 步骤1 已经会自动打开 OAuth 页面，这里作为兜底（比如断点续跑时步骤1没执行）
   await openOauthUrl();
+  await waitForAutoPageSettle();
   await checkAutoControl();
   await executeSignupStep(2);
+  await waitForAutoPageSettle();
   await checkAutoControl();
   const signupStep3Result = await executeSignupStep(3);
   const skipSignupVerification = Boolean(signupStep3Result?.skipSignupVerification);
@@ -162,14 +170,19 @@ export async function continueSingleAutoFlow({ state = {}, actions = {} } = {}) 
     await findCurrentEmailRecord();
     await addLog('阶段 2：打开认证页面并进入注册流程');
     await openOauthUrl();
+    await waitForAutoPageSettle();
   }
 
-  if (startStep === 2) {
+  if (startStep <= 2) {
     await checkAutoControl();
     await executeSignupStep(2);
+    await waitForAutoPageSettle();
   }
 
   if (startStep <= 3) {
+    if (startStep <= 2) {
+      await checkAutoControl();
+    }
     await checkAutoControl();
     const signupStep3Result = await executeSignupStep(3);
     if (signupStep3Result?.switchToLoginFlow) {

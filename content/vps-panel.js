@@ -2,6 +2,10 @@ const utils = globalThis.HotmailRegisterUtils;
 const oauthHelpers = globalThis.HotmailRegisterOAuthHelpers || {};
 const step9StatusHelpers = globalThis.HotmailRegisterStep9Status || {};
 
+const STEP9_EXISTING_SUCCESS_WAIT_MS = 1500;
+const STEP9_STATUS_TIMEOUT_MS = 18000;
+const STEP9_PENDING_CONFLICT_GRACE_MS = 4000;
+
 function isVisibleElement(element) {
   return utils.isVisible(element);
 }
@@ -37,7 +41,7 @@ function collectStep9StatusTexts() {
   return Array.from(new Set(texts));
 }
 
-async function waitForStep9SuccessStatus(timeout = 30000) {
+async function waitForStep9SuccessStatus(timeout = STEP9_STATUS_TIMEOUT_MS) {
   const startedAt = Date.now();
   let pendingConflictSeenAt = 0;
 
@@ -48,6 +52,7 @@ async function waitForStep9SuccessStatus(timeout = 30000) {
       texts: statusTexts,
       now: Date.now(),
       pendingConflictSeenAt,
+      pendingConflictGraceMs: STEP9_PENDING_CONFLICT_GRACE_MS,
     });
     if (outcome.kind === 'success') {
       return outcome.text;
@@ -60,7 +65,7 @@ async function waitForStep9SuccessStatus(timeout = 30000) {
         pendingConflictSeenAt = Date.now();
         utils.log('步骤 9：CPA 暂时提示 oauth flow is not pending，先继续等待成功状态同步...', 'warn');
       }
-      await utils.sleep(500);
+      await utils.sleep(200);
       continue;
     }
     if (outcome.kind === 'pending_conflict_timeout') {
@@ -73,7 +78,7 @@ async function waitForStep9SuccessStatus(timeout = 30000) {
   throw new Error(getStatusBadgeText() || 'CPA 面板长时间未出现认证结果。');
 }
 
-async function waitForExistingStep9Success(timeout = 8000) {
+async function waitForExistingStep9Success(timeout = STEP9_EXISTING_SUCCESS_WAIT_MS) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeout) {
     const statusTexts = collectStep9StatusTexts();
@@ -282,13 +287,15 @@ async function step9Verify(payload) {
 
   const existingSuccessText = oauthHelpers.findStep9SuccessText?.(collectStep9StatusTexts());
   if (existingSuccessText) {
+    utils.log(`步骤 9：提交前已识别 CPA 成功状态：${existingSuccessText}`, 'ok');
     utils.reportComplete(9, { localhostUrl, verifiedStatus: existingSuccessText });
     return { localhostUrl, verifiedStatus: existingSuccessText };
   }
 
   utils.log('步骤 9：正在等待 CPA 面板同步 OAuth 结果，若已成功则跳过回调提交...');
-  const successDuringGrace = await waitForExistingStep9Success(8000);
+  const successDuringGrace = await waitForExistingStep9Success();
   if (successDuringGrace) {
+    utils.log(`步骤 9：短暂等待后已识别 CPA 成功状态：${successDuringGrace}`, 'ok');
     utils.reportComplete(9, { localhostUrl, verifiedStatus: successDuringGrace });
     return { localhostUrl, verifiedStatus: successDuringGrace };
   }
@@ -309,6 +316,7 @@ async function step9Verify(payload) {
   utils.simulateClick(submitButton);
   utils.log('步骤 9：已提交回调 URL，正在等待 CPA 面板确认结果...');
   const verifiedStatus = await waitForStep9SuccessStatus();
+  utils.log(`步骤 9：已识别 CPA 成功状态：${verifiedStatus}`, 'ok');
   utils.reportComplete(9, { localhostUrl, verifiedStatus });
   return { localhostUrl, verifiedStatus };
 }

@@ -5,6 +5,7 @@ export async function executeSignupStepCommand({
   payload = null,
   state,
   ensureCurrentAccount,
+  resolveCurrentProfile,
   openOauthUrl,
   addLog,
   sendToActiveAuthTab,
@@ -23,6 +24,16 @@ export async function executeSignupStepCommand({
         ...account,
         password,
       },
+    });
+  }
+
+  if (step === 5) {
+    const account = await ensureCurrentAccount(state);
+    const profile = await resolveCurrentProfile?.(state, account);
+    return sendToActiveAuthTab({
+      type: 'EXECUTE_STEP',
+      step,
+      payload: profile || {},
     });
   }
 

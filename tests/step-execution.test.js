@@ -104,3 +104,54 @@ test('executeSignupStepCommand sends step 6 to the reopened auth tab', async () 
     ['sendToTab', 42, { type: 'EXECUTE_STEP', step: 6, payload: account }],
   ]);
 });
+
+test('executeSignupStepCommand sends step 5 with resolved current profile', async () => {
+  const calls = [];
+  const state = {};
+  const account = {
+    address: 'user@hotmail.com',
+  };
+  const profile = {
+    firstName: 'Liam',
+    lastName: 'Stone',
+    fullName: 'Liam Stone',
+    birthday: '1999-03-08',
+    age: '27',
+  };
+
+  const result = await executeSignupStepCommand({
+    step: 5,
+    state,
+    ensureCurrentAccount: async (receivedState) => {
+      calls.push(['ensureCurrentAccount', receivedState]);
+      return account;
+    },
+    resolveCurrentProfile: async (receivedState, receivedAccount) => {
+      calls.push(['resolveCurrentProfile', receivedState, receivedAccount]);
+      return profile;
+    },
+    sendToActiveAuthTab: async (message) => {
+      calls.push(['sendToActiveAuthTab', message]);
+      return { ok: true, message };
+    },
+  });
+
+  assert.deepEqual(result, {
+    ok: true,
+    message: {
+      type: 'EXECUTE_STEP',
+      step: 5,
+      payload: profile,
+    },
+  });
+
+  assert.deepEqual(calls, [
+    ['ensureCurrentAccount', state],
+    ['resolveCurrentProfile', state, account],
+    ['sendToActiveAuthTab', {
+      type: 'EXECUTE_STEP',
+      step: 5,
+      payload: profile,
+    }],
+  ]);
+});

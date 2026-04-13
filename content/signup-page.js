@@ -317,11 +317,18 @@ async function switchStep3ToLoginFlow(payload, source = 'direct') {
 }
 
 async function detectExistingAccountLoginFlow(payload, timeout = 8000) {
-  if (helpers.isLoginFlowUrl?.(location.href) || helpers.isLoginPasswordPageText(getPageTextSnapshot())) {
+  const pageText = getPageTextSnapshot();
+  if (helpers.shouldTreatAsDirectLoginFlow?.({
+    url: location.href,
+    text: pageText,
+    hasVerificationPage: isVerificationPageStillVisible(),
+    hasProfileSetupPage: isProfileSetupPageReady(),
+    hasSignupIdentifierPage: isSignupIdentifierPageReady(),
+    hasSignupPasswordPage: isSignupPasswordCreationPageReady(),
+  })) {
     return switchStep3ToLoginFlow(payload, 'direct');
   }
 
-  const pageText = getPageTextSnapshot();
   const loginAction = findLoginAction();
   if (!helpers.isExistingAccountSignalText?.(pageText) || !loginAction) {
     return null;
@@ -861,10 +868,17 @@ async function fillCode(payload) {
   return { ok: true };
 }
 
-async function step5FillProfile() {
-  const fullName = 'Alex Stone';
-  const age = '28';
-  const birthday = '1996-08-17';
+async function step5FillProfile(payload = {}) {
+  const fullName = String(payload.fullName || '').trim();
+  const firstName = String(payload.firstName || '').trim();
+  const lastName = String(payload.lastName || '').trim();
+  const age = String(payload.age || '').trim();
+  const birthday = String(payload.birthday || '').trim();
+
+  if (!fullName || !firstName || !lastName || !age || !birthday) {
+    throw new Error('步骤 5：缺少可用资料，请重新开始当前账号流程。');
+  }
+
   const waitStartedAt = Date.now();
   let singleNameInput = null;
   let firstNameInput = null;
@@ -898,8 +912,8 @@ async function step5FillProfile() {
     utils.setInputValue(singleNameInput, fullName);
     utils.log(`步骤 5：姓名已填写：${fullName}`);
   } else if ((firstNameInput && isVisibleElement(firstNameInput)) && (lastNameInput && isVisibleElement(lastNameInput))) {
-    utils.setInputValue(firstNameInput, 'Alex');
-    utils.setInputValue(lastNameInput, 'Stone');
+    utils.setInputValue(firstNameInput, firstName);
+    utils.setInputValue(lastNameInput, lastName);
     utils.log(`步骤 5：姓名已填写：${fullName}`);
   } else {
     throw new Error(`步骤 5：未找到可填写的姓名字段。URL: ${location.href}`);
@@ -978,7 +992,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     EXECUTE_STEP: async () => {
       if (message.step === 2) return step2OpenSignup();
       if (message.step === 3) return step3FillCredentials(message.payload || {});
-      if (message.step === 5) return step5FillProfile();
+      if (message.step === 5) return step5FillProfile(message.payload || {});
       if (message.step === 6) return step6Login(message.payload || {});
       if (message.step === 8) return step8FindAndClick();
       return { ok: true, skipped: true };

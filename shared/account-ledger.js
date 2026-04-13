@@ -3,6 +3,9 @@ function normalizeAddress(address) {
 }
 
 function hasRegisteredTag(account, tagName = '已注册') {
+  if (account?.ignoreRegisteredTag) {
+    return false;
+  }
   return Array.isArray(account?.tags)
     && account.tags.some((tag) => tag?.name === tagName);
 }

@@ -1,3 +1,5 @@
+import { expandHotmailAliasesForAccount, findBaseAccountByAlias } from './hotmail-aliases.js';
+
 const DEFAULT_BASE_URL = 'https://www.appleemail.top';
 
 function buildUrl(baseUrl, pathname, query = {}) {
@@ -79,7 +81,7 @@ export function createAppleEmailClient({
     };
   }
 
-  async function listAccounts() {
+  function parseAccountPool() {
     const lines = String(_accountPoolText || '')
       .split(/\r?\n/)
       .map((line) => line.trim())
@@ -107,14 +109,32 @@ export function createAppleEmailClient({
         requestedEmail: parts[0],
         resolvedEmail: parts[0],
         matchedAlias: '',
+        baseAddress: parts[0].toLowerCase(),
+        isAlias: false,
+        aliasIndex: null,
+        aliasSuffix: '',
+        displayAddress: parts[0].toLowerCase(),
+        ignoreRegisteredTag: false,
       };
     }).filter(Boolean);
   }
 
+  async function listAccounts() {
+    return parseAccountPool()
+      .flatMap((account) => expandHotmailAliasesForAccount(account));
+  }
+
   async function findUserEmailByAddress(address) {
     const normalizedAddress = String(address || '').trim().toLowerCase();
-    const accounts = await listAccounts();
-    return accounts.find((account) => account.address === normalizedAddress) || null;
+    const accounts = parseAccountPool();
+    const directMatch = accounts.find((account) => (
+      account.address === normalizedAddress
+      || account.aliases.includes(normalizedAddress)
+    ));
+    if (directMatch) {
+      return directMatch;
+    }
+    return findBaseAccountByAlias(accounts, normalizedAddress);
   }
 
   async function findFirstUnregisteredAccount({
@@ -148,6 +168,8 @@ export function createAppleEmailClient({
       };
     }
 
+    const resolvedEmail = String(account.baseAddress || account.address || '').trim().toLowerCase();
+    const matchedAlias = account.matchedAlias || (normalizedEmail !== resolvedEmail ? normalizedEmail : '');
     const authParams = buildAuthParams(account);
     const page = Math.floor(skip / Math.max(1, top)) + 1;
     const pageSize = Math.min(top, 50);
@@ -156,7 +178,7 @@ export function createAppleEmailClient({
     if (keyword) {
       payload = await request('/api/mail-search', {
         ...authParams,
-        email: normalizedEmail,
+        email: resolvedEmail,
         keyword,
         page,
         page_size: pageSize,
@@ -165,7 +187,7 @@ export function createAppleEmailClient({
     } else {
       payload = await request('/api/mail-all', {
         ...authParams,
-        email: normalizedEmail,
+        email: resolvedEmail,
         mailbox: folder === 'Junk' ? 'Junk' : 'INBOX',
         page,
         page_size: pageSize,
@@ -187,8 +209,8 @@ export function createAppleEmailClient({
       partial: false,
       details: null,
       requestedEmail: email,
-      resolvedEmail: normalizedEmail,
-      matchedAlias: '',
+      resolvedEmail,
+      matchedAlias,
       hasMore,
     };
   }
@@ -200,10 +222,11 @@ export function createAppleEmailClient({
       throw new Error(`AppleEmail 账号池中未找到邮箱：${normalizedEmail}`);
     }
 
+    const resolvedEmail = String(account.baseAddress || account.address || '').trim().toLowerCase();
     const authParams = buildAuthParams(account);
     const payload = await request('/api/mail-detail', {
       ...authParams,
-      email: normalizedEmail,
+      email: resolvedEmail,
       mail_id: messageId,
       response_type: 'json',
     });

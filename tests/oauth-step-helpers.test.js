@@ -15,6 +15,7 @@ import {
   isSignupFlowUrl,
   isSignupPageText,
   isLoopbackCallbackUrl,
+  shouldTreatAsDirectLoginFlow,
   shouldUseStep8ContinueButton,
 } from '../shared/oauth-step-helpers-core.js';
 
@@ -117,6 +118,35 @@ test('isExistingAccountSignalText only matches explicit account-exists errors', 
   assert.equal(isExistingAccountSignalText('Account associated with this email address already exists'), true);
   assert.equal(isExistingAccountSignalText('This email address is already in use'), true);
   assert.equal(isExistingAccountSignalText('Already have an account? Log in'), false);
+});
+
+test('shouldTreatAsDirectLoginFlow only switches on explicit login pages', () => {
+  assert.equal(shouldTreatAsDirectLoginFlow({
+    url: 'https://auth.openai.com/u/login/password?state=1',
+    text: 'Enter your password Forgot password Log in with a one-time code',
+    hasVerificationPage: false,
+    hasProfileSetupPage: false,
+    hasSignupIdentifierPage: false,
+    hasSignupPasswordPage: false,
+  }), true);
+
+  assert.equal(shouldTreatAsDirectLoginFlow({
+    url: 'https://auth.openai.com/u/login/identifier?screen_hint=signup&state=1',
+    text: 'Create an account Email address Already have an account? Log in',
+    hasVerificationPage: false,
+    hasProfileSetupPage: false,
+    hasSignupIdentifierPage: true,
+    hasSignupPasswordPage: false,
+  }), false);
+
+  assert.equal(shouldTreatAsDirectLoginFlow({
+    url: 'https://auth.openai.com/u/login/password?screen_hint=signup&state=1',
+    text: 'Create your password to continue',
+    hasVerificationPage: false,
+    hasProfileSetupPage: false,
+    hasSignupIdentifierPage: false,
+    hasSignupPasswordPage: true,
+  }), false);
 });
 
 test('isSignupPasswordValidationErrorText matches password rule errors only', () => {

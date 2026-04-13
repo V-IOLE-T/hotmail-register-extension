@@ -26,6 +26,7 @@ function normalizeAccount(account = {}) {
   return {
     id: account.id || 0,
     address: String(account.email || '').trim().toLowerCase(),
+    baseAddress: String(account.email || '').trim().toLowerCase(),
     aliases: Array.isArray(account.aliases) ? account.aliases.map((item) => String(item || '').trim().toLowerCase()) : [],
     password: account.password || account.mail_password || account.login_password || '',
     clientId: account.client_id || account.clientId || '',
@@ -40,6 +41,11 @@ function normalizeAccount(account = {}) {
     requestedEmail: account.requested_email || '',
     resolvedEmail: account.resolved_email || account.email || '',
     matchedAlias: account.matched_alias || '',
+    isAlias: false,
+    aliasIndex: null,
+    aliasSuffix: '',
+    displayAddress: String(account.email || '').trim().toLowerCase(),
+    ignoreRegisteredTag: false,
   };
 }
 
@@ -47,6 +53,7 @@ function normalizeTempAccount(account = {}) {
   return {
     id: account.id || account.temp_id || 0,
     address: String(account.email || account.email_addr || account.address || '').trim().toLowerCase(),
+    baseAddress: String(account.email || account.email_addr || account.address || '').trim().toLowerCase(),
     aliases: [],
     password: account.password || account.mail_password || account.login_password || account.jwt || '',
     clientId: '',
@@ -61,6 +68,11 @@ function normalizeTempAccount(account = {}) {
     requestedEmail: account.requested_email || account.email || account.email_addr || '',
     resolvedEmail: account.resolved_email || account.email || account.email_addr || account.address || '',
     matchedAlias: '',
+    isAlias: false,
+    aliasIndex: null,
+    aliasSuffix: '',
+    displayAddress: String(account.email || account.email_addr || account.address || '').trim().toLowerCase(),
+    ignoreRegisteredTag: false,
   };
 }
 
@@ -149,18 +161,28 @@ export function createLuckmailClient({
     const payload = await request('/api/external/accounts', {
       group_id: groupId,
     });
-    const externalAccounts = (Array.isArray(payload.accounts) ? payload.accounts : []).map(normalizeAccount);
+    const externalAccounts = (Array.isArray(payload.accounts) ? payload.accounts : [])
+      .map(normalizeAccount);
     const tempAccounts = await listTempAccounts();
     return [...externalAccounts, ...tempAccounts].filter((account) => account.address);
   }
 
   async function findUserEmailByAddress(address, options = {}) {
     const normalizedAddress = String(address || '').trim().toLowerCase();
-    const accounts = await listAccounts(options);
-    return accounts.find((account) => (
+    const payload = await request('/api/external/accounts', {
+      group_id: options.groupId,
+    });
+    const externalAccounts = (Array.isArray(payload.accounts) ? payload.accounts : []).map(normalizeAccount);
+    const directExternalMatch = externalAccounts.find((account) => (
       account.address === normalizedAddress
       || account.aliases.includes(normalizedAddress)
-    )) || null;
+    ));
+    if (directExternalMatch) {
+      return directExternalMatch;
+    }
+
+    const tempAccounts = await listTempAccounts();
+    return tempAccounts.find((account) => account.address === normalizedAddress) || null;
   }
 
   async function findFirstUnregisteredAccount({
@@ -173,7 +195,8 @@ export function createLuckmailClient({
     const blockedStatuses = new Set(excludeStatuses);
     const blockedAddresses = new Set(excludedAddresses.map((item) => String(item || '').trim().toLowerCase()));
     return accounts.find((account) => {
-      const hasRegisteredTag = account.tags.some((tag) => tag?.name === tagName);
+      const hasRegisteredTag = !account.ignoreRegisteredTag
+        && account.tags.some((tag) => tag?.name === tagName);
       const isBlocked = blockedStatuses.has(account.status);
       const isExcludedAddress = blockedAddresses.has(account.address);
       return !hasRegisteredTag && !isBlocked && !isExcludedAddress;

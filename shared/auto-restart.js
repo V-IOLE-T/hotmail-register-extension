@@ -10,6 +10,8 @@ export function buildAutoRestartRuntimeUpdates({
     currentAccountIndex: nextIndex,
     currentAccount: null,
     currentEmailRecord: null,
+    currentProfile: null,
+    callbackTabId: null,
     localhostUrl: '',
     lastSignupCode: '',
     lastLoginCode: '',

@@ -286,6 +286,9 @@ function renderLogs(state) {
 
 function formatAccountMeta(account = {}) {
   const meta = [];
+  if (account.isAlias && account.baseAddress) {
+    meta.push(`原邮箱 ${account.baseAddress}`);
+  }
   if (account.provider) {
     meta.push(account.provider);
   }
@@ -310,6 +313,8 @@ function renderAccountPicker(state = latestState) {
 
   const locked = Boolean(state?.autoRunning || state?.autoPaused);
   const selectedAddress = String(state?.selectedAccountAddress || '').trim();
+  const selectedAccount = accountSearchResults.find((account) => account.address === selectedAddress)
+    || (state?.currentAccount?.address === selectedAddress ? state.currentAccount : null);
   const query = input.value.trim();
 
   input.disabled = locked;
@@ -318,7 +323,9 @@ function renderAccountPicker(state = latestState) {
   }
 
   selectedHint.textContent = selectedAddress
-    ? `已指定：${selectedAddress}`
+    ? (selectedAccount?.isAlias && selectedAccount?.baseAddress
+      ? `已指定：${selectedAddress}（原邮箱 ${selectedAccount.baseAddress}）`
+      : `已指定：${selectedAddress}`)
     : '未指定：将使用第一个可用邮箱';
   selectedHint.classList.toggle('is-active', Boolean(selectedAddress));
 
@@ -527,6 +534,39 @@ async function runAction(type, payload, options = {}) {
       flashButton(button, 'is-success');
     }
     return data;
+  } catch (error) {
+    if (button) {
+      flashButton(button, 'is-error');
+    }
+    showToast(error.message, 'error', 3200);
+    throw error;
+  } finally {
+    if (button) {
+      setButtonBusy(button, false);
+      updateActionAvailability(latestState);
+    }
+  }
+}
+
+async function runStep1FetchAndOpen() {
+  const button = getButton('step-1');
+
+  try {
+    if (button) {
+      setButtonBusy(button, true, '执行中...');
+    }
+    if (formDirty) {
+      await persistForm({ silent: true });
+    }
+
+    await call('GET_OAUTH_FROM_VPS');
+    await call('OPEN_OAUTH_URL');
+    await refreshState();
+    showToast('步骤 1 已完成，OAuth 页面已打开', 'success');
+
+    if (button) {
+      flashButton(button, 'is-success');
+    }
   } catch (error) {
     if (button) {
       flashButton(button, 'is-error');
@@ -798,10 +838,12 @@ elements.clearSelectedAccountButton?.addEventListener('click', () => {
   clearSelectedAccount().catch(() => {});
 });
 
-bindAction('step-1', 'GET_OAUTH_FROM_VPS', {
-  saveFirst: true,
-  successMessage: '步骤 1 已完成',
-  loadingText: '执行中...',
+getButton('step-1')?.addEventListener('click', () => {
+  const button = getButton('step-1');
+  if (isButtonBusy(button)) {
+    return;
+  }
+  runStep1FetchAndOpen().catch(() => {});
 });
 
 bindAction('step-2', 'EXECUTE_SIGNUP_STEP', {

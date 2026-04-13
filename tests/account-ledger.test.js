@@ -186,3 +186,25 @@ test('listSkippedAccounts returns skipped addresses grouped by reason', () => {
     taggedRegistered: ['tagged@outlook.com'],
   });
 });
+
+test('alias accounts can stay available even when base record carries 已注册 tag', () => {
+  const accounts = [
+    {
+      address: 'user+ABC123@hotmail.com',
+      baseAddress: 'user@hotmail.com',
+      tags: [{ name: '已注册' }],
+      ignoreRegisteredTag: true,
+    },
+  ];
+
+  const result = resolveCurrentAccountSelection({
+    accounts,
+    ledger: {},
+    startIndex: 0,
+  });
+
+  assert.deepEqual(result, {
+    account: accounts[0],
+    index: 0,
+  });
+});

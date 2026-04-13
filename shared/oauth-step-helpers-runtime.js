@@ -141,6 +141,31 @@
     return /create\s+an\s+account|continue\s+with\s+google|continue\s+with\s+apple|continue\s+with\s+microsoft|already\s+have\s+an\s+account\?\s*log\s*in|创建(?:帐户|账户|账号)|继续使用\s*(?:google|apple|microsoft)\s*登录|已经有(?:帐户|账户|账号)了？\s*请登录/i.test(normalizeInlineText(text));
   }
 
+  function shouldTreatAsDirectLoginFlow(state = {}) {
+    const normalizedText = normalizeInlineText(state.text);
+    if (!normalizedText && !state.url) {
+      return false;
+    }
+
+    if (state.hasVerificationPage || state.hasProfileSetupPage || state.hasSignupIdentifierPage || state.hasSignupPasswordPage) {
+      return false;
+    }
+
+    if (isLoginPasswordPageText(normalizedText)) {
+      return true;
+    }
+
+    if (!isLoginFlowUrl(state.url) || isSignupFlowUrl(state.url)) {
+      return false;
+    }
+
+    if (isSignupLandingPageText(normalizedText) || isSignupPageText(normalizedText) || isProfileSetupPageText(normalizedText)) {
+      return false;
+    }
+
+    return true;
+  }
+
   function isExplicitSignupFlowPageText(text) {
     const normalized = normalizeInlineText(text);
     if (!normalized || isLoginPasswordPageText(normalized)) {
@@ -176,6 +201,7 @@
     isProfileSetupPageText,
     isSignupActionText,
     isSignupLandingPageText,
+    shouldTreatAsDirectLoginFlow,
     isSignupPasswordValidationErrorText,
     isSignupPageText,
     isStep8ActionText,
