@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { buildPanelTabOpenPlan } from '../shared/panel-tab-plan.js';
 
-test('buildPanelTabOpenPlan skips load wait when existing tab is already complete on same url', () => {
+test('buildPanelTabOpenPlan reloads existing tab on same url when refresh is required', () => {
   const plan = buildPanelTabOpenPlan({
     existingTab: {
       id: 7,
@@ -14,9 +14,9 @@ test('buildPanelTabOpenPlan skips load wait when existing tab is already complet
   });
 
   assert.deepEqual(plan, {
-    action: 'activate',
+    action: 'reload',
     tabId: 7,
-    waitForComplete: false,
+    waitForComplete: true,
     injectAfterLoad: false,
     url: 'http://127.0.0.1:3000/management.html#/oauth',
   });

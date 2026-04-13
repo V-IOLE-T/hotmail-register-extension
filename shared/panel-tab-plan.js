@@ -18,6 +18,16 @@ export function buildPanelTabOpenPlan({
   }
 
   if ((existingTab.url || '') === targetUrl) {
+    if (!preserveExistingTab && existingTab.status === 'complete') {
+      return {
+        action: 'reload',
+        tabId: existingTab.id,
+        waitForComplete: true,
+        injectAfterLoad: false,
+        url: targetUrl,
+      };
+    }
+
     return {
       action: 'activate',
       tabId: existingTab.id,

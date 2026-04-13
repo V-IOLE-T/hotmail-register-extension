@@ -1,5 +1,72 @@
 # HANDOFF
 
+## 2026-04-13 第二轮卡在 OAuth 登录页补充（以下内容补充最新状态）
+
+- 补充时间：2026-04-13
+- 触发背景：
+  - 用户真实联调时，第 1 轮可跑到步骤 9 并认证成功
+  - 进入第 2 轮后，日志停在：
+    - `阶段 1：刷新 CPA 并重新获取 OAuth 链接`
+    - `步骤 1：正在从 CPA 面板抓取 OAuth 链接...`
+    - `获取 OAuth 链接失败：vps-panel 就绪超时，等待超过 15 秒`
+  - 页面表现为：
+    - CPA 仍停留在 `OAuth 登录` 页面
+    - 没有真正刷新出下一轮可用的 OAuth 状态
+
+### 本次确认的根因
+
+- 根因不在步骤 9 的“认证成功”判定，而在第 2 轮重新进入 CPA 页时的标签页复用策略：
+  - 用户 README 推荐填写的 `CPA URL` 本来就是 `.../management.html#/oauth`
+  - `GET_OAUTH_FROM_VPS()` 再次打开同一个 URL 时，会走 `openOrReusePanelTab()`
+  - 旧逻辑里 `buildPanelTabOpenPlan()` 对“同 URL 且标签页已 complete”返回的是：
+    - `action: 'activate'`
+    - `waitForComplete: false`
+  - 结果：
+    - 第 2 轮实际上只是重新激活旧的 `OAuth 登录` 标签页
+    - 没有真正执行 refresh / reload
+    - 后台虽然继续等待 `CONTENT_SCRIPT_READY`，但旧页状态没有被重建，最终表现为 `vps-panel 就绪超时`
+
+### 本次修复
+
+- `shared/panel-tab-plan.js`
+  - 当：
+    - 已存在面板标签页
+    - URL 与目标 `CPA URL` 完全相同
+    - 且不是 `preserveExistingTab`
+    - 且当前页已 `complete`
+  - 改为返回：
+    - `action: 'reload'`
+    - `waitForComplete: true`
+  - 含义：
+    - 第 1 步“刷新 CPA 并重新获取 OAuth 链接”现在会真的刷新旧页，而不是只激活
+
+- `background.js`
+  - `openOrReusePanelTab()` 新增对 `reload` action 的处理：
+    - 先激活已有 tab
+    - 再执行 `chrome.tabs.reload(tabId, { bypassCache: true })`
+    - 然后等待加载完成，再重新注入脚本
+
+### 本次修改的关键文件
+
+- `shared/panel-tab-plan.js`
+- `background.js`
+- `tests/panel-tab-plan.test.js`
+
+### fresh 验证证据
+
+```bash
+node --test tests/panel-tab-plan.test.js
+node --check background.js
+node --check shared/panel-tab-plan.js
+npm test
+```
+
+结果：
+
+- 新增的“同 URL 需要 reload”测试先红后绿
+- 后台与计划模块语法检查通过
+- 全量 `123/123` 通过
+
 ## 2026-04-13 指定邮箱面板折叠与位置调整补充（以下内容补充最新状态）
 
 - 补充时间：2026-04-13

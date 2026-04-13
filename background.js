@@ -480,6 +480,10 @@ async function openOrReusePanelTab(source, url, files, options = {}) {
   let tab = null;
   if (plan.action === 'activate' && plan.tabId) {
     tab = await chrome.tabs.update(plan.tabId, { active: true });
+  } else if (plan.action === 'reload' && plan.tabId) {
+    await chrome.tabs.update(plan.tabId, { active: true });
+    await chrome.tabs.reload(plan.tabId, { bypassCache: true });
+    tab = await chrome.tabs.get(plan.tabId);
   } else if (plan.action === 'update' && plan.tabId) {
     tab = await chrome.tabs.update(plan.tabId, { url: plan.url, active: true });
   } else {
