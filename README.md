@@ -204,3 +204,13 @@ npm test
 - [Codex](https://openai.com/codex)-AI coding assistant by OpenAI
 - 参考仓库：[QLHazyCoder/codex-oauth-automation-extension](https://github.com/QLHazyCoder/codex-oauth-automation-extension)
 - Outlook Email 仓库：[assast/outlookEmail](https://github.com/assast/outlookEmail/tree/main)
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=V-IOLE-T%2Fhotmail-register-extension&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=V-IOLE-T/hotmail-register-extension&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=V-IOLE-T/hotmail-register-extension&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=V-IOLE-T/hotmail-register-extension&type=date&legend=top-left" />
+ </picture>
+</a>
